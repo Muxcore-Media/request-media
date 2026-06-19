@@ -1,6 +1,7 @@
 FROM golang:1.26-alpine AS builder
 COPY core/ /build/core/
 COPY media-movies/ /build/media-movies/
+COPY metadata-tmdb/ /build/metadata-tmdb/
 COPY request-media/ /build/request-media/
 WORKDIR /build/request-media
 RUN go mod download
