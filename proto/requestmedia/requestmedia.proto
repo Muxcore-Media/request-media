@@ -1,0 +1,53 @@
+syntax = "proto3";
+package muxcore.media.request.v1;
+option go_package = "github.com/Muxcore-Media/request-media/proto/requestmedia;requestmedia";
+
+service RequestService {
+  rpc RequestMovie(RequestMovieRequest) returns (RequestMovieResponse);
+  rpc RequestTV(RequestTVRequest) returns (RequestTVResponse);
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+}
+
+message RequestMovieRequest {
+  int32 tmdb_id = 1;
+  string title = 2;
+  int32 year = 3;
+  string overview = 4;
+  repeated string genres = 5;
+}
+
+message RequestMovieResponse {
+  string request_id = 1;
+  string movie_id = 2;
+  string status = 3;
+}
+
+message RequestTVRequest {
+  int32 tmdb_id = 1;
+  string title = 2;
+  int32 year = 3;
+  int32 season_number = 4;
+  int32 episode_number = 5;
+  string overview = 6;
+}
+
+message RequestTVResponse {
+  string request_id = 1;
+  string series_id = 2;
+  string status = 3;
+}
+
+message GetStatusRequest {
+  string request_id = 1;
+}
+
+message GetStatusResponse {
+  string request_id = 1;
+  string item_type = 2;
+  string item_id = 3;
+  string title = 4;
+  int32 year = 5;
+  string status = 6;
+  string created_at = 7;
+  string updated_at = 8;
+}

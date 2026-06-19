@@ -1,0 +1,10 @@
+linters:
+  enable:
+    - gofmt
+    - govet
+    - staticcheck
+linters-settings:
+  staticcheck:
+    checks: ["all"]
+run:
+  timeout: 3m
