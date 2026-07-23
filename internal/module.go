@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -17,9 +18,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/Muxcore-Media/core/pkg/contracts"
+	workflowv1 "github.com/Muxcore-Media/core/proto/gen/muxcore/workflow/v1"
 	"github.com/Muxcore-Media/core/sdk/go/client"
 	mgmntv1 "github.com/Muxcore-Media/media-movies/proto/mgmntv1"
+	tvmgmtv1 "github.com/Muxcore-Media/media-tvshows/proto/tvmgmtv1"
 	metadatav1 "github.com/Muxcore-Media/metadata-tmdb/proto/metadatav1"
+	"github.com/Muxcore-Media/request-media/internal/reqstore"
 	requestmedia "github.com/Muxcore-Media/request-media/proto/requestmedia"
 )
 
@@ -28,14 +32,19 @@ type Module struct {
 
 	mu       sync.RWMutex
 	mc       *client.Client
+	store    *reqstore.Store
 	id       string
 	grpcAddr string
 	httpAddr string
+	dataDir  string
 	requests map[string]*requestRecord
 	grpcSrv  *grpc.Server
 	httpSrv  *http.Server
 	lis      net.Listener
 	httpLis  net.Listener
+
+	// findAddr overrides capability discovery in tests.
+	findAddr func(ctx context.Context, capability string) (string, error)
 }
 
 type requestRecord struct {
@@ -55,6 +64,7 @@ type Config struct {
 	ID       string
 	GRPCAddr string
 	HTTPAddr string
+	DataDir  string
 }
 
 func NewModule(cfg Config) *Module {
@@ -77,10 +87,19 @@ func NewModule(cfg Config) *Module {
 			cfg.HTTPAddr = ":9380"
 		}
 	}
+	if cfg.DataDir == "" {
+		if v := os.Getenv("REQUEST_DATA_DIR"); v != "" {
+			cfg.DataDir = v
+		}
+		if cfg.DataDir == "" {
+			cfg.DataDir = "data"
+		}
+	}
 	return &Module{
 		id:       cfg.ID,
 		grpcAddr: cfg.GRPCAddr,
 		httpAddr: cfg.HTTPAddr,
+		dataDir:  cfg.DataDir,
 		requests: make(map[string]*requestRecord),
 	}
 }
@@ -100,6 +119,25 @@ func (m *Module) Info() contracts.ModuleInfo {
 }
 
 func (m *Module) Init(ctx context.Context) error {
+	if err := os.MkdirAll(m.dataDir, 0o755); err != nil {
+		return fmt.Errorf("create data dir %s: %w", m.dataDir, err)
+	}
+	store, err := reqstore.Open(filepath.Join(m.dataDir, "requests.db"))
+	if err != nil {
+		return fmt.Errorf("open request store: %w", err)
+	}
+	loaded, err := store.LoadAll()
+	if err != nil {
+		store.Close()
+		return fmt.Errorf("load requests: %w", err)
+	}
+	m.store = store
+	m.mu.Lock()
+	for id, r := range loaded {
+		m.requests[id] = fromStoreRecord(r)
+	}
+	m.mu.Unlock()
+
 	grpcLis, err := net.Listen("tcp", m.grpcAddr)
 	if err != nil {
 		return fmt.Errorf("listen gRPC %s: %w", m.grpcAddr, err)
@@ -112,7 +150,7 @@ func (m *Module) Init(ctx context.Context) error {
 	}
 	m.httpLis = httpLis
 
-	slog.Info("request-media initialized", "grpc", m.grpcAddr, "http", m.httpAddr)
+	slog.Info("request-media initialized", "grpc", m.grpcAddr, "http", m.httpAddr, "data_dir", m.dataDir, "requests", len(loaded))
 	return nil
 }
 
@@ -155,6 +193,9 @@ func (m *Module) Stop(ctx context.Context) error {
 	if m.mc != nil {
 		m.mc.Close()
 	}
+	if m.store != nil {
+		m.store.Close()
+	}
 	slog.Info("request-media stopped")
 	return nil
 }
@@ -168,7 +209,7 @@ func (m *Module) dialCore(ctx context.Context) {
 	if meshAddr == "" {
 		meshAddr = "localhost:9090"
 	}
-	insecureMode := os.Getenv("MUXCORE_GRPC_INSECURE") == "true"
+	insecureMode := os.Getenv("MUXCORE_INSECURE_DISABLE_TLS") == "true" || os.Getenv("MUXCORE_GRPC_INSECURE") == "true"
 	var opts []client.Option
 	if insecureMode {
 		opts = append(opts, client.WithInsecure())
@@ -193,6 +234,9 @@ func (m *Module) publish(ctx context.Context, eventType string, payload map[stri
 }
 
 func (m *Module) findModuleAddr(ctx context.Context, capability string) (string, error) {
+	if m.findAddr != nil {
+		return m.findAddr(ctx, capability)
+	}
 	if m.mc == nil {
 		return "", fmt.Errorf("not connected to core")
 	}
@@ -217,6 +261,54 @@ func (m *Module) findModuleAddr(ctx context.Context, capability string) (string,
 	return "", fmt.Errorf("no module with capability %q found", capability)
 }
 
+func (m *Module) findModuleAddrPrefer(ctx context.Context, capabilities ...string) (string, error) {
+	var lastErr error
+	for _, cap := range capabilities {
+		addr, err := m.findModuleAddr(ctx, cap)
+		if err == nil {
+			return addr, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no module found")
+	}
+	return "", lastErr
+}
+
+func (m *Module) saveRequest(rec *requestRecord) {
+	now := time.Now()
+	if rec.CreatedAt.IsZero() {
+		rec.CreatedAt = now
+	}
+	rec.UpdatedAt = now
+	m.mu.Lock()
+	m.requests[rec.ID] = rec
+	m.mu.Unlock()
+	if m.store == nil {
+		return
+	}
+	if err := m.store.Put(toStoreRecord(rec)); err != nil {
+		slog.Warn("persist request failed", "id", rec.ID, "error", err)
+	}
+}
+
+func toStoreRecord(r *requestRecord) *reqstore.Record {
+	return &reqstore.Record{
+		ID: r.ID, ItemType: r.ItemType, ItemID: r.ItemID, TMDBID: r.TMDBID,
+		Title: r.Title, Year: r.Year, Poster: r.Poster, Status: r.Status,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+func fromStoreRecord(r *reqstore.Record) *requestRecord {
+	return &requestRecord{
+		ID: r.ID, ItemType: r.ItemType, ItemID: r.ItemID, TMDBID: r.TMDBID,
+		Title: r.Title, Year: r.Year, Poster: r.Poster, Status: r.Status,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
 func (m *Module) metadataClient(ctx context.Context) (metadatav1.MetadataServiceClient, *grpc.ClientConn, error) {
 	addr, err := m.findModuleAddr(ctx, "metadata")
 	if err != nil {
@@ -232,12 +324,12 @@ func (m *Module) metadataClient(ctx context.Context) (metadatav1.MetadataService
 // --- HTTP Handlers ---
 
 type searchResult struct {
-	ID        int32   `json:"id"`
-	Title     string  `json:"title"`
-	Year      int32   `json:"year"`
-	Overview  string  `json:"overview"`
-	Poster    string  `json:"poster"`
-	VoteAvg   float64 `json:"voteAvg"`
+	ID       int32   `json:"id"`
+	Title    string  `json:"title"`
+	Year     int32   `json:"year"`
+	Overview string  `json:"overview"`
+	Poster   string  `json:"poster"`
+	VoteAvg  float64 `json:"voteAvg"`
 }
 
 func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -318,6 +410,9 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 	m.mu.Lock()
 	if rec, ok := m.requests[gResp.GetRequestId()]; ok {
 		rec.Poster = req.Poster
+		if m.store != nil {
+			_ = m.store.Put(toStoreRecord(rec))
+		}
 	}
 	m.mu.Unlock()
 
@@ -591,21 +686,60 @@ func extractYear(date string) int32 {
 	return 0
 }
 
+func (m *Module) tryRunWorkflow(ctx context.Context, definitionID string, input map[string]string) (runID string, ok bool) {
+	addr, err := m.findModuleAddr(ctx, "workflow.engine")
+	if err != nil {
+		return "", false
+	}
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return "", false
+	}
+	defer conn.Close()
+	wf := workflowv1.NewWorkflowServiceClient(conn)
+	resp, err := wf.Run(ctx, &workflowv1.RunRequest{
+		DefinitionId: definitionID,
+		Input:        input,
+	})
+	if err != nil {
+		slog.Warn("request-media: workflow Run failed", "definition", definitionID, "error", err)
+		return "", false
+	}
+	return resp.GetRunId(), true
+}
+
 func (m *Module) RequestMovie(ctx context.Context, req *requestmedia.RequestMovieRequest) (*requestmedia.RequestMovieResponse, error) {
 	requestID := fmt.Sprintf("req_mv_%d", time.Now().UnixNano())
 
-	addr, err := m.findModuleAddr(ctx, "media.library")
+	if runID, ok := m.tryRunWorkflow(ctx, "movie-request", map[string]string{
+		"title":      req.GetTitle(),
+		"year":       fmt.Sprintf("%d", req.GetYear()),
+		"tmdb_id":    fmt.Sprintf("%d", req.GetTmdbId()),
+		"request_id": requestID,
+	}); ok {
+		m.saveRequest(&requestRecord{
+			ID: requestID, ItemType: "movie", Title: req.GetTitle(),
+			Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "workflow",
+		})
+		go m.publish(context.Background(), "media.movie.requested", map[string]interface{}{
+			"request_id": requestID, "tmdb_id": req.GetTmdbId(),
+			"title": req.GetTitle(), "year": req.GetYear(), "run_id": runID,
+		})
+		return &requestmedia.RequestMovieResponse{
+			RequestId: requestID, MovieId: "", Status: "workflow",
+		}, nil
+	}
+
+	addr, err := m.findModuleAddrPrefer(ctx, "media.library.movie", "media.library.movies", "media.library")
 	if err != nil {
 		go m.publish(context.Background(), "media.movie.requested", map[string]interface{}{
 			"request_id": requestID, "tmdb_id": req.GetTmdbId(),
 			"title": req.GetTitle(), "year": req.GetYear(),
 		})
-		m.mu.Lock()
-		m.requests[requestID] = &requestRecord{
+		m.saveRequest(&requestRecord{
 			ID: requestID, ItemType: "movie", Title: req.GetTitle(),
-			Year: req.GetYear(), Status: "requested", CreatedAt: time.Now(), UpdatedAt: time.Now(),
-		}
-		m.mu.Unlock()
+			Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "requested",
+		})
 		return &requestmedia.RequestMovieResponse{
 			RequestId: requestID, MovieId: "", Status: "requested",
 		}, nil
@@ -630,13 +764,10 @@ func (m *Module) RequestMovie(ctx context.Context, req *requestmedia.RequestMovi
 	}
 
 	movieID := addResp.GetMovieId()
-	m.mu.Lock()
-	m.requests[requestID] = &requestRecord{
+	m.saveRequest(&requestRecord{
 		ID: requestID, ItemType: "movie", ItemID: movieID, TMDBID: req.GetTmdbId(),
 		Title: req.GetTitle(), Year: req.GetYear(), Status: "added",
-		CreatedAt: time.Now(), UpdatedAt: time.Now(),
-	}
-	m.mu.Unlock()
+	})
 
 	go m.publish(context.Background(), "media.movie.requested", map[string]interface{}{
 		"request_id": requestID, "movie_id": movieID,
@@ -651,20 +782,73 @@ func (m *Module) RequestMovie(ctx context.Context, req *requestmedia.RequestMovi
 
 func (m *Module) RequestTV(ctx context.Context, req *requestmedia.RequestTVRequest) (*requestmedia.RequestTVResponse, error) {
 	requestID := fmt.Sprintf("req_tv_%d", time.Now().UnixNano())
-	m.mu.Lock()
-	m.requests[requestID] = &requestRecord{
-		ID: requestID, ItemType: "tv", Title: req.GetTitle(),
-		Year: req.GetYear(), Status: "requested", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	if runID, ok := m.tryRunWorkflow(ctx, "tv-request", map[string]string{
+		"title":          req.GetTitle(),
+		"year":           fmt.Sprintf("%d", req.GetYear()),
+		"tmdb_id":        fmt.Sprintf("%d", req.GetTmdbId()),
+		"season_number":  fmt.Sprintf("%d", req.GetSeasonNumber()),
+		"episode_number": fmt.Sprintf("%d", req.GetEpisodeNumber()),
+		"request_id":     requestID,
+	}); ok {
+		m.saveRequest(&requestRecord{
+			ID: requestID, ItemType: "tv", Title: req.GetTitle(),
+			Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "workflow",
+		})
+		go m.publish(context.Background(), "media.tv.requested", map[string]interface{}{
+			"request_id": requestID, "tmdb_id": req.GetTmdbId(),
+			"title": req.GetTitle(), "year": req.GetYear(), "run_id": runID,
+			"season_number": req.GetSeasonNumber(), "episode_number": req.GetEpisodeNumber(),
+		})
+		return &requestmedia.RequestTVResponse{RequestId: requestID, Status: "workflow"}, nil
 	}
-	m.mu.Unlock()
+
+	addr, err := m.findModuleAddr(ctx, "media.library.tv")
+	if err != nil {
+		m.saveRequest(&requestRecord{
+			ID: requestID, ItemType: "tv", Title: req.GetTitle(),
+			Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "requested",
+		})
+		go m.publish(context.Background(), "media.tv.requested", map[string]interface{}{
+			"request_id": requestID, "tmdb_id": req.GetTmdbId(),
+			"title": req.GetTitle(), "year": req.GetYear(),
+			"season_number": req.GetSeasonNumber(), "episode_number": req.GetEpisodeNumber(),
+		})
+		slog.Info("tv requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId())
+		return &requestmedia.RequestTVResponse{
+			RequestId: requestID, Status: "requested",
+		}, nil
+	}
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, fmt.Errorf("dial media-tvshows: %w", err)
+	}
+	defer conn.Close()
+
+	tvClient := tvmgmtv1.NewTvManagementServiceClient(conn)
+	addResp, err := tvClient.AddTVShow(ctx, &tvmgmtv1.AddTVShowRequest{
+		TmdbId:   req.GetTmdbId(),
+		Name:     req.GetTitle(),
+		Year:     req.GetYear(),
+		Overview: req.GetOverview(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("add tv show: %w", err)
+	}
+
+	seriesID := addResp.GetSeriesId()
+	m.saveRequest(&requestRecord{
+		ID: requestID, ItemType: "tv", ItemID: seriesID, TMDBID: req.GetTmdbId(),
+		Title: req.GetTitle(), Year: req.GetYear(), Status: "added",
+	})
 	go m.publish(context.Background(), "media.tv.requested", map[string]interface{}{
-		"request_id": requestID, "tmdb_id": req.GetTmdbId(),
+		"request_id": requestID, "series_id": seriesID, "tmdb_id": req.GetTmdbId(),
 		"title": req.GetTitle(), "year": req.GetYear(),
 		"season_number": req.GetSeasonNumber(), "episode_number": req.GetEpisodeNumber(),
 	})
-	slog.Info("tv requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId())
+	slog.Info("tv requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId(), "series_id", seriesID)
 	return &requestmedia.RequestTVResponse{
-		RequestId: requestID, Status: "requested",
+		RequestId: requestID, SeriesId: seriesID, Status: "added",
 	}, nil
 }
 
