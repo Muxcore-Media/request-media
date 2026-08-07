@@ -14,7 +14,7 @@ Web UI and gRPC API for requesting movies and TV shows into the MuxCore media pi
 
 | Env Var | Default | Description |
 |---------|---------|-------------|
-| `REQUEST_GRPC_ADDR` | `:9480` | gRPC listen address |
+| `REQUEST_GRPC_ADDR` | `:9481` | gRPC listen address |
 | `REQUEST_HTTP_ADDR` | `:9380` | HTTP UI / JSON API listen address |
 | `MUXCORE_GRPC_ADDR` | `localhost:9090` | Core mesh gRPC address (client dial) |
 | `MUXCORE_INSECURE_DISABLE_TLS` | unset | Set `true` to disable TLS for module SDK / mesh dial |
