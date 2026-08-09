@@ -203,3 +203,17 @@ func TestRequestTV_AddTVShowFallback(t *testing.T) {
 		t.Fatalf("AddTVShow not called: %+v", stub.last)
 	}
 }
+
+func TestDialAddrForModule(t *testing.T) {
+	t.Setenv("MUXCORE_MESH_DIAL_LOCAL", "")
+	if got := dialAddrForModule("indexer-a", "127.0.0.1:9401"); got != "127.0.0.1:9401" {
+		t.Fatalf("explicit host: %s", got)
+	}
+	if got := dialAddrForModule("metadata-tmdb", ":9411"); got != "metadata-tmdb:9411" {
+		t.Fatalf("docker dns: %s", got)
+	}
+	t.Setenv("MUXCORE_MESH_DIAL_LOCAL", "true")
+	if got := dialAddrForModule("metadata-tmdb", ":9411"); got != "127.0.0.1:9411" {
+		t.Fatalf("local dial: %s", got)
+	}
+}
