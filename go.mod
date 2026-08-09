@@ -3,13 +3,13 @@ module github.com/Muxcore-Media/request-media
 go 1.26.4
 
 require (
-	github.com/Muxcore-Media/core v0.4.0
-	github.com/Muxcore-Media/core/pkg/contracts v0.0.0
-	github.com/Muxcore-Media/core/sdk/go/client v0.1.0
-	github.com/Muxcore-Media/core/sdk/go/module v0.1.0
+	github.com/Muxcore-Media/core v0.5.0
+	github.com/Muxcore-Media/core/pkg/contracts v0.5.0
+	github.com/Muxcore-Media/core/sdk/go/client v0.5.0
+	github.com/Muxcore-Media/core/sdk/go/module v0.5.0
 	github.com/Muxcore-Media/media-movies v0.1.0
-	github.com/Muxcore-Media/media-tvshows v0.1.0
-	github.com/Muxcore-Media/metadata-tmdb v0.1.0
+	github.com/Muxcore-Media/media-tvshows v0.1.1
+	github.com/Muxcore-Media/metadata-tmdb v0.1.1
 	google.golang.org/grpc v1.82.1
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.54.0
@@ -29,17 +29,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/Muxcore-Media/core => ../core
-
-replace github.com/Muxcore-Media/core/sdk/go/module => ../core/sdk/go/module
-
-replace github.com/Muxcore-Media/core/pkg/contracts => ../core/pkg/contracts
-
-replace github.com/Muxcore-Media/core/sdk/go/client => ../core/sdk/go/client
-
-replace github.com/Muxcore-Media/media-movies => ../media-movies
-
-replace github.com/Muxcore-Media/media-tvshows => ../media-tvshows
-
-replace github.com/Muxcore-Media/metadata-tmdb => ../metadata-tmdb
