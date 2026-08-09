@@ -245,20 +245,36 @@ func (m *Module) findModuleAddr(ctx context.Context, capability string) (string,
 		return "", fmt.Errorf("discover %s: %w", capability, err)
 	}
 	for _, mod := range modules {
-		addr := mod.HttpAddr
+		addr := dialAddrForModule(mod.Id, mod.HttpAddr)
 		if addr == "" {
 			continue
-		}
-		// Extract port from the registered address. The host part may be
-		// rewritten to the core node's hostname, so always use the module
-		// ID as the Docker DNS hostname for cross-container reachability.
-		_, port, splitErr := net.SplitHostPort(addr)
-		if splitErr == nil && port != "" {
-			addr = mod.Id + ":" + port
 		}
 		return addr, nil
 	}
 	return "", fmt.Errorf("no module with capability %q found", capability)
+}
+
+// dialAddrForModule maps discovery HttpAddr to a dial target.
+// Explicit hosts are preserved. Bare/wildcard hosts use the module ID for
+// Docker DNS, unless MUXCORE_MESH_DIAL_LOCAL=true (host MVP → 127.0.0.1).
+func dialAddrForModule(moduleID, httpAddr string) string {
+	if httpAddr == "" {
+		return ""
+	}
+	host, port, err := net.SplitHostPort(httpAddr)
+	if err != nil || port == "" {
+		return httpAddr
+	}
+	if host != "" && host != "0.0.0.0" && host != "::" {
+		return net.JoinHostPort(host, port)
+	}
+	if os.Getenv("MUXCORE_MESH_DIAL_LOCAL") == "true" {
+		return net.JoinHostPort("127.0.0.1", port)
+	}
+	if moduleID != "" {
+		return net.JoinHostPort(moduleID, port)
+	}
+	return httpAddr
 }
 
 func (m *Module) findModuleAddrPrefer(ctx context.Context, capabilities ...string) (string, error) {
