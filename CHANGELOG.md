@@ -1,6 +1,12 @@
 # Changelog
 
 
+## [0.2.6] — 2026-08-10
+
+### Added
+- SettingsProvider mesh (`RegisterSettings`) for `prefer_workflow` routing toggle.
+
+
 ## [0.2.5] — 2026-08-10
 
 ### Fixed
