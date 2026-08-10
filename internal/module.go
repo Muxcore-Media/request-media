@@ -127,11 +127,11 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:             m.id,
 		Name:           "Request Media",
-		Version:      "0.2.6",
+		Version:      "0.2.7",
 		Roles:          []string{"media_request"},
 		Description:    "Web UI and gRPC API for requesting movies and TV shows",
 		Author:         "MuxCore",
-		Capabilities:   []string{"media.request"},
+		Capabilities:   []string{"media.request", "settings"},
 		MinCoreVersion: "0.4.0",
 		HTTPAddr:       m.httpAddr,
 	}
