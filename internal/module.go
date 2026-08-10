@@ -20,6 +20,7 @@ import (
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	workflowv1 "github.com/Muxcore-Media/core/proto/gen/muxcore/workflow/v1"
 	"github.com/Muxcore-Media/core/sdk/go/client"
+	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
 	mgmntv1 "github.com/Muxcore-Media/media-movies/proto/mgmntv1"
 	tvmgmtv1 "github.com/Muxcore-Media/media-tvshows/proto/tvmgmtv1"
 	metadatav1 "github.com/Muxcore-Media/metadata-tmdb/proto/metadatav1"
@@ -45,6 +46,9 @@ type Module struct {
 
 	// findAddr overrides capability discovery in tests.
 	findAddr func(ctx context.Context, capability string) (string, error)
+
+	automationClient automationv1.AutomationServiceClient
+	automationConn   *grpc.ClientConn
 }
 
 type requestRecord struct {
@@ -108,7 +112,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:             m.id,
 		Name:           "Request Media",
-		Version:        "0.2.0",
+		Version:        "0.2.4",
 		Roles:          []string{"media_request"},
 		Description:    "Web UI and gRPC API for requesting movies and TV shows",
 		Author:         "MuxCore",
@@ -192,6 +196,9 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	if m.mc != nil {
 		m.mc.Close()
+	}
+	if m.automationConn != nil {
+		m.automationConn.Close()
 	}
 	if m.store != nil {
 		m.store.Close()
@@ -324,6 +331,77 @@ func fromStoreRecord(r *reqstore.Record) *requestRecord {
 		Title: r.Title, Year: r.Year, Poster: r.Poster, Status: r.Status,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
+}
+
+func (m *Module) ensureAutomation(ctx context.Context) error {
+	m.mu.RLock()
+	if m.automationClient != nil {
+		m.mu.RUnlock()
+		return nil
+	}
+	m.mu.RUnlock()
+	addr, err := m.findModuleAddr(ctx, "media.automation")
+	if err != nil {
+		return err
+	}
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("dial automation: %w", err)
+	}
+	m.mu.Lock()
+	m.automationConn = conn
+	m.automationClient = automationv1.NewAutomationServiceClient(conn)
+	m.mu.Unlock()
+	return nil
+}
+
+type queueParams struct {
+	ItemType         string
+	ItemID           string
+	TmdbID           int32
+	Title            string
+	Year             int32
+	SeasonNumber     int32
+	EpisodeNumber    int32
+	QualityProfileID string
+}
+
+func (m *Module) tryQueueForAcquisition(ctx context.Context, p queueParams) {
+	// Detach from caller deadline — HTTP clients often cancel before automation
+	// finishes clean-title fetch inside AddToQueue. Request success must not wait.
+	go m.queueForAcquisitionAsync(p)
+}
+
+func (m *Module) queueForAcquisitionAsync(p queueParams) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := m.ensureAutomation(ctx); err != nil {
+		slog.Warn("request-media: automation unavailable for queue", "title", p.Title, "error", err)
+		return
+	}
+	m.mu.RLock()
+	ac := m.automationClient
+	m.mu.RUnlock()
+	if ac == nil {
+		slog.Warn("request-media: automation client nil", "title", p.Title)
+		return
+	}
+	resp, err := ac.AddToQueue(ctx, &automationv1.AddToQueueRequest{
+		ItemType:         p.ItemType,
+		ItemId:           p.ItemID,
+		TmdbId:           p.TmdbID,
+		Title:            p.Title,
+		Year:             p.Year,
+		SeasonNumber:     p.SeasonNumber,
+		EpisodeNumber:    p.EpisodeNumber,
+		QualityProfileId: p.QualityProfileID,
+	})
+	if err != nil {
+		slog.Warn("request-media: AddToQueue failed", "title", p.Title, "item_id", p.ItemID, "error", err)
+		return
+	}
+	slog.Info("request-media: queued for acquisition",
+		"title", p.Title, "item_type", p.ItemType, "item_id", p.ItemID, "queue_id", resp.GetQueueId())
 }
 
 func (m *Module) metadataClient(ctx context.Context) (metadatav1.MetadataServiceClient, *grpc.ClientConn, error) {
@@ -742,6 +820,10 @@ func (m *Module) RequestMovie(ctx context.Context, req *requestmedia.RequestMovi
 			"request_id": requestID, "tmdb_id": req.GetTmdbId(),
 			"title": req.GetTitle(), "year": req.GetYear(), "run_id": runID,
 		})
+		m.tryQueueForAcquisition(ctx, queueParams{
+			ItemType: "movie", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
+			TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
+		})
 		return &requestmedia.RequestMovieResponse{
 			RequestId: requestID, MovieId: "", Status: "workflow",
 		}, nil
@@ -756,6 +838,10 @@ func (m *Module) RequestMovie(ctx context.Context, req *requestmedia.RequestMovi
 		m.saveRequest(&requestRecord{
 			ID: requestID, ItemType: "movie", Title: req.GetTitle(),
 			Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "requested",
+		})
+		m.tryQueueForAcquisition(ctx, queueParams{
+			ItemType: "movie", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
+			TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
 		})
 		return &requestmedia.RequestMovieResponse{
 			RequestId: requestID, MovieId: "", Status: "requested",
@@ -791,6 +877,11 @@ func (m *Module) RequestMovie(ctx context.Context, req *requestmedia.RequestMovi
 		"tmdb_id": req.GetTmdbId(), "title": req.GetTitle(), "year": req.GetYear(),
 	})
 
+	m.tryQueueForAcquisition(ctx, queueParams{
+		ItemType: "movie", ItemID: movieID,
+		TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
+	})
+
 	slog.Info("movie requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId(), "movie_id", movieID)
 	return &requestmedia.RequestMovieResponse{
 		RequestId: requestID, MovieId: movieID, Status: "added",
@@ -816,6 +907,11 @@ func (m *Module) RequestTV(ctx context.Context, req *requestmedia.RequestTVReque
 			"title": req.GetTitle(), "year": req.GetYear(), "run_id": runID,
 			"season_number": req.GetSeasonNumber(), "episode_number": req.GetEpisodeNumber(),
 		})
+		m.tryQueueForAcquisition(ctx, queueParams{
+			ItemType: "tv", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
+			TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
+			SeasonNumber: req.GetSeasonNumber(), EpisodeNumber: req.GetEpisodeNumber(),
+		})
 		return &requestmedia.RequestTVResponse{RequestId: requestID, Status: "workflow"}, nil
 	}
 
@@ -829,6 +925,11 @@ func (m *Module) RequestTV(ctx context.Context, req *requestmedia.RequestTVReque
 			"request_id": requestID, "tmdb_id": req.GetTmdbId(),
 			"title": req.GetTitle(), "year": req.GetYear(),
 			"season_number": req.GetSeasonNumber(), "episode_number": req.GetEpisodeNumber(),
+		})
+		m.tryQueueForAcquisition(ctx, queueParams{
+			ItemType: "tv", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
+			TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
+			SeasonNumber: req.GetSeasonNumber(), EpisodeNumber: req.GetEpisodeNumber(),
 		})
 		slog.Info("tv requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId())
 		return &requestmedia.RequestTVResponse{
@@ -862,6 +963,11 @@ func (m *Module) RequestTV(ctx context.Context, req *requestmedia.RequestTVReque
 		"request_id": requestID, "series_id": seriesID, "tmdb_id": req.GetTmdbId(),
 		"title": req.GetTitle(), "year": req.GetYear(),
 		"season_number": req.GetSeasonNumber(), "episode_number": req.GetEpisodeNumber(),
+	})
+	m.tryQueueForAcquisition(ctx, queueParams{
+		ItemType: "tv", ItemID: seriesID,
+		TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
+		SeasonNumber: req.GetSeasonNumber(), EpisodeNumber: req.GetEpisodeNumber(),
 	})
 	slog.Info("tv requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId(), "series_id", seriesID)
 	return &requestmedia.RequestTVResponse{
