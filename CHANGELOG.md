@@ -1,5 +1,11 @@
 # Changelog
 
+
+## [0.2.5] — 2026-08-10
+
+### Fixed
+- Sync Info()/muxcore.json version to **0.2.5**.
+
 ## v0.2.4 (2026-08-10)
 
 - Auto-queue requested movie/TV items into media-automation (`AddToQueue`) asynchronously
