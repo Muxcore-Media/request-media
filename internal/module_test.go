@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 
+	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
 	mgmntv1 "github.com/Muxcore-Media/media-movies/proto/mgmntv1"
 	tvmgmtv1 "github.com/Muxcore-Media/media-tvshows/proto/tvmgmtv1"
 	requestmedia "github.com/Muxcore-Media/request-media/proto/requestmedia"
@@ -126,6 +128,16 @@ func (s *stubTV) AddTVShow(ctx context.Context, req *tvmgmtv1.AddTVShowRequest) 
 	return &tvmgmtv1.AddTVShowResponse{SeriesId: "series-1"}, nil
 }
 
+type stubAutomation struct {
+	automationv1.UnimplementedAutomationServiceServer
+	last *automationv1.AddToQueueRequest
+}
+
+func (s *stubAutomation) AddToQueue(ctx context.Context, req *automationv1.AddToQueueRequest) (*automationv1.AddToQueueResponse, error) {
+	s.last = req
+	return &automationv1.AddToQueueResponse{QueueId: "q-1"}, nil
+}
+
 func startGRPC(t *testing.T, register func(*grpc.Server)) string {
 	t.Helper()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -217,3 +229,147 @@ func TestDialAddrForModule(t *testing.T) {
 		t.Fatalf("local dial: %s", got)
 	}
 }
+
+func TestRequestMovie_QueuesAutomationAfterAdd(t *testing.T) {
+	m := testModule(t)
+	moviesStub := &stubMovies{}
+	autoStub := &stubAutomation{}
+	moviesAddr := startGRPC(t, func(s *grpc.Server) {
+		mgmntv1.RegisterMovieManagementServiceServer(s, moviesStub)
+	})
+	autoAddr := startGRPC(t, func(s *grpc.Server) {
+		automationv1.RegisterAutomationServiceServer(s, autoStub)
+	})
+	m.findAddr = func(ctx context.Context, capability string) (string, error) {
+		switch capability {
+		case "media.library.movie":
+			return moviesAddr, nil
+		case "media.automation":
+			return autoAddr, nil
+		default:
+			return "", fmt.Errorf("no %s", capability)
+		}
+	}
+	resp, err := m.RequestMovie(context.Background(), &requestmedia.RequestMovieRequest{
+		TmdbId: 550, Title: "Fight Club", Year: 1999,
+	})
+	if err != nil {
+		t.Fatalf("RequestMovie: %v", err)
+	}
+	if resp.GetStatus() != "added" {
+		t.Fatalf("status = %q, want added", resp.GetStatus())
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for autoStub.last == nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if autoStub.last == nil {
+		t.Fatal("AddToQueue not called")
+	}
+	if autoStub.last.GetItemType() != "movie" || autoStub.last.GetItemId() != "movie-1" ||
+		autoStub.last.GetTmdbId() != 550 || autoStub.last.GetTitle() != "Fight Club" {
+		t.Fatalf("AddToQueue = %+v", autoStub.last)
+	}
+}
+
+func TestRequestMovie_SucceedsWhenAutomationUnavailable(t *testing.T) {
+	m := testModule(t)
+	moviesStub := &stubMovies{}
+	moviesAddr := startGRPC(t, func(s *grpc.Server) {
+		mgmntv1.RegisterMovieManagementServiceServer(s, moviesStub)
+	})
+	m.findAddr = func(ctx context.Context, capability string) (string, error) {
+		if capability == "media.library.movie" {
+			return moviesAddr, nil
+		}
+		return "", fmt.Errorf("no %s", capability)
+	}
+	resp, err := m.RequestMovie(context.Background(), &requestmedia.RequestMovieRequest{
+		TmdbId: 550, Title: "Fight Club", Year: 1999,
+	})
+	if err != nil {
+		t.Fatalf("RequestMovie: %v", err)
+	}
+	if resp.GetStatus() != "added" {
+		t.Fatalf("status = %q, want added", resp.GetStatus())
+	}
+}
+
+func TestRequestMovie_QueuesAutomationWhenLibraryUnavailable(t *testing.T) {
+	m := testModule(t)
+	autoStub := &stubAutomation{}
+	autoAddr := startGRPC(t, func(s *grpc.Server) {
+		automationv1.RegisterAutomationServiceServer(s, autoStub)
+	})
+	m.findAddr = func(ctx context.Context, capability string) (string, error) {
+		if capability == "media.automation" {
+			return autoAddr, nil
+		}
+		return "", fmt.Errorf("no %s", capability)
+	}
+	resp, err := m.RequestMovie(context.Background(), &requestmedia.RequestMovieRequest{
+		TmdbId: 218, Title: "The Terminator", Year: 1984,
+	})
+	if err != nil {
+		t.Fatalf("RequestMovie: %v", err)
+	}
+	if resp.GetStatus() != "requested" {
+		t.Fatalf("status = %q, want requested", resp.GetStatus())
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for autoStub.last == nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if autoStub.last == nil {
+		t.Fatal("AddToQueue not called")
+	}
+	if autoStub.last.GetItemId() != "tmdb_218" || autoStub.last.GetItemType() != "movie" {
+		t.Fatalf("AddToQueue = %+v", autoStub.last)
+	}
+}
+
+func TestRequestTV_QueuesAutomationAfterAdd(t *testing.T) {
+	m := testModule(t)
+	tvStub := &stubTV{}
+	autoStub := &stubAutomation{}
+	tvAddr := startGRPC(t, func(s *grpc.Server) {
+		tvmgmtv1.RegisterTvManagementServiceServer(s, tvStub)
+	})
+	autoAddr := startGRPC(t, func(s *grpc.Server) {
+		automationv1.RegisterAutomationServiceServer(s, autoStub)
+	})
+	m.findAddr = func(ctx context.Context, capability string) (string, error) {
+		switch capability {
+		case "media.library.tv":
+			return tvAddr, nil
+		case "media.automation":
+			return autoAddr, nil
+		case "workflow.engine":
+			return "", fmt.Errorf("no workflow")
+		default:
+			return "", fmt.Errorf("no %s", capability)
+		}
+	}
+	resp, err := m.RequestTV(context.Background(), &requestmedia.RequestTVRequest{
+		TmdbId: 1396, Title: "Breaking Bad", Year: 2008, SeasonNumber: 1, EpisodeNumber: 1,
+	})
+	if err != nil {
+		t.Fatalf("RequestTV: %v", err)
+	}
+	if resp.GetStatus() != "added" || resp.GetSeriesId() != "series-1" {
+		t.Fatalf("resp = %+v", resp)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for autoStub.last == nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if autoStub.last == nil {
+		t.Fatal("AddToQueue not called")
+	}
+	if autoStub.last.GetItemType() != "tv" || autoStub.last.GetItemId() != "series-1" ||
+		autoStub.last.GetTmdbId() != 1396 || autoStub.last.GetSeasonNumber() != 1 ||
+		autoStub.last.GetEpisodeNumber() != 1 {
+		t.Fatalf("AddToQueue = %+v", autoStub.last)
+	}
+}
+
