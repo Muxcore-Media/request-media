@@ -1,13 +1,14 @@
 {
   "name": "Request Media",
   "description": "Accepts media requests and dispatches them to the automation pipeline",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "author": "MuxCore",
   "roles": [
     "media_request"
   ],
   "capabilities": [
-    "media.request"
+    "media.request",
+    "settings"
   ],
   "minCoreVersion": "0.4.0"
 }
