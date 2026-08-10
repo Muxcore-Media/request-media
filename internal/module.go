@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -441,6 +442,7 @@ type searchResult struct {
 	Overview string  `json:"overview"`
 	Poster   string  `json:"poster"`
 	VoteAvg  float64 `json:"voteAvg"`
+	Type     string  `json:"type,omitempty"`
 }
 
 func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -454,6 +456,14 @@ func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mediaType := metadatav1.MediaType_MEDIA_TYPE_MOVIE
+	resultType := "movie"
+	switch strings.ToLower(r.URL.Query().Get("type")) {
+	case "tv", "show", "series":
+		mediaType = metadatav1.MediaType_MEDIA_TYPE_TV
+		resultType = "tv"
+	}
+
 	client, conn, err := m.metadataClient(r.Context())
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -465,7 +475,7 @@ func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := client.Search(r.Context(), &metadatav1.SearchRequest{
 		Query: q,
-		Type:  metadatav1.MediaType_MEDIA_TYPE_MOVIE,
+		Type:  mediaType,
 		Page:  1,
 	})
 	if err != nil {
@@ -477,11 +487,19 @@ func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	results := make([]searchResult, 0, len(resp.GetResults()))
 	for _, r := range resp.GetResults() {
-		year := extractYear(r.GetReleaseDate())
+		title := r.GetTitle()
+		if title == "" {
+			title = r.GetName()
+		}
+		date := r.GetReleaseDate()
+		if date == "" {
+			date = r.GetFirstAirDate()
+		}
+		year := extractYear(date)
 		results = append(results, searchResult{
-			ID: r.GetId(), Title: r.GetTitle(), Year: year,
+			ID: r.GetId(), Title: title, Year: year,
 			Overview: r.GetOverview(), Poster: r.GetPosterPath(),
-			VoteAvg: r.GetVoteAverage(),
+			VoteAvg: r.GetVoteAverage(), Type: resultType,
 		})
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -495,14 +513,53 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		TMDBID   int32  `json:"tmdbId"`
-		Title    string `json:"title"`
-		Year     int32  `json:"year"`
-		Overview string `json:"overview"`
-		Poster   string `json:"poster"`
+		TMDBID    int32  `json:"tmdbId"`
+		Title     string `json:"title"`
+		Year      int32  `json:"year"`
+		Overview  string `json:"overview"`
+		Poster    string `json:"poster"`
+		MediaType string `json:"mediaType"`
+		ItemType  string `json:"itemType"`
+		Type      string `json:"type"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	kind := strings.ToLower(strings.TrimSpace(req.MediaType))
+	if kind == "" {
+		kind = strings.ToLower(strings.TrimSpace(req.ItemType))
+	}
+	if kind == "" {
+		kind = strings.ToLower(strings.TrimSpace(req.Type))
+	}
+	if kind == "tv" || kind == "show" || kind == "series" {
+		gResp, err := m.RequestTV(r.Context(), &requestmedia.RequestTVRequest{
+			TmdbId:   req.TMDBID,
+			Title:    req.Title,
+			Year:     req.Year,
+			Overview: req.Overview,
+		})
+		if err != nil {
+			slog.Error("request tv", "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		m.mu.Lock()
+		if rec, ok := m.requests[gResp.GetRequestId()]; ok {
+			rec.Poster = req.Poster
+			if m.store != nil {
+				_ = m.store.Put(toStoreRecord(rec))
+			}
+		}
+		m.mu.Unlock()
+		json.NewEncoder(w).Encode(map[string]string{
+			"requestId": gResp.GetRequestId(),
+			"seriesId":  gResp.GetSeriesId(),
+			"status":    gResp.GetStatus(),
+			"type":      "tv",
+		})
 		return
 	}
 
@@ -531,6 +588,7 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 		"requestId": gResp.GetRequestId(),
 		"movieId":   gResp.GetMovieId(),
 		"status":    gResp.GetStatus(),
+		"type":      "movie",
 	})
 }
 
@@ -573,7 +631,8 @@ const indexHTML = `<!DOCTYPE html>
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#111;color:#eee;min-height:100vh}
 header{background:#1a1a2e;padding:16px 24px;display:flex;align-items:center;gap:16px;border-bottom:2px solid #e66001}
 header h1{font-size:20px;color:#e66001}
-.search-bar{flex:1;max-width:600px;display:flex;gap:8px}
+.search-bar{flex:1;max-width:720px;display:flex;gap:8px;align-items:center}
+.search-bar select{padding:10px 12px;border:1px solid #333;border-radius:6px;background:#222;color:#eee;font-size:14px}
 .search-bar input{flex:1;padding:10px 14px;border:1px solid #333;border-radius:6px;background:#222;color:#eee;font-size:14px}
 .search-bar input:focus{outline:none;border-color:#e66001}
 .search-bar button{padding:10px 20px;background:#e66001;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600}
@@ -615,7 +674,11 @@ main{display:flex;gap:24px;padding:24px;max-width:1400px;margin:0 auto}
 <header>
 <h1>Request Media</h1>
 <div class="search-bar">
-<input id="searchInput" type="text" placeholder="Search for a movie..." autofocus>
+<select id="mediaType" aria-label="Media type">
+<option value="movie">Movie</option>
+<option value="tv">TV</option>
+</select>
+<input id="searchInput" type="text" placeholder="Search for a movie or series..." autofocus>
 <button id="searchBtn" onclick="search()">Search</button>
 </div>
 </header>
@@ -652,9 +715,10 @@ document.getElementById('searchInput').addEventListener('keydown', function(e) {
 async function search() {
 const q = document.getElementById('searchInput').value.trim();
 if (!q) return;
+const mediaType = document.getElementById('mediaType').value || 'movie';
 document.getElementById('searchBtn').disabled = true;
 try {
-const resp = await fetch('/api/search?q=' + encodeURIComponent(q));
+const resp = await fetch('/api/search?q=' + encodeURIComponent(q) + '&type=' + encodeURIComponent(mediaType));
 const data = await resp.json();
 if (data.error) { renderResults([]); showManualEntry(q, data.error); }
 else { renderResults(data.results || []); hideManualEntry(); }
@@ -725,7 +789,7 @@ document.getElementById('requestBtn').className = 'request-btn';
 document.getElementById('requestBtn').disabled = false;
 document.getElementById('statusMsg').textContent = '';
 
-fetch('/api/search?q=' + encodeURIComponent(document.getElementById('searchInput').value.trim())).then(r => r.json()).then(data => {
+fetch('/api/search?q=' + encodeURIComponent(document.getElementById('searchInput').value.trim()) + '&type=' + encodeURIComponent(document.getElementById('mediaType').value || 'movie')).then(r => r.json()).then(data => {
 const results = data.results || [];
 const movie = results.find(r => r.id === id);
 if (!movie) return;
@@ -750,7 +814,7 @@ try {
 const resp = await fetch('/api/request', {
 method: 'POST',
 headers: {'Content-Type': 'application/json'},
-body: JSON.stringify({tmdbId: selectedMovie.id, title: selectedMovie.title, year: selectedMovie.year, overview: selectedMovie.overview, poster: selectedMovie.poster})
+body: JSON.stringify({tmdbId: selectedMovie.id, title: selectedMovie.title, year: selectedMovie.year, overview: selectedMovie.overview, poster: selectedMovie.poster, mediaType: document.getElementById('mediaType').value || 'movie'})
 });
 const result = await resp.json();
 if (result.status === 'added') {
