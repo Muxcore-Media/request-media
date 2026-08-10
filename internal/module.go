@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	workflowv1 "github.com/Muxcore-Media/core/proto/gen/muxcore/workflow/v1"
 	"github.com/Muxcore-Media/core/sdk/go/client"
+	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
 	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
 	mgmntv1 "github.com/Muxcore-Media/media-movies/proto/mgmntv1"
 	tvmgmtv1 "github.com/Muxcore-Media/media-tvshows/proto/tvmgmtv1"
@@ -31,13 +33,15 @@ import (
 type Module struct {
 	requestmedia.UnimplementedRequestServiceServer
 
-	mu       sync.RWMutex
-	mc       *client.Client
-	store    *reqstore.Store
-	id       string
+	mu    sync.RWMutex
+	cfgMu sync.RWMutex
+	mc    *client.Client
+	store *reqstore.Store
+	id    string
 	grpcAddr string
 	httpAddr string
 	dataDir  string
+	preferWorkflow bool
 	requests map[string]*requestRecord
 	grpcSrv  *grpc.Server
 	httpSrv  *http.Server
@@ -65,10 +69,11 @@ type requestRecord struct {
 }
 
 type Config struct {
-	ID       string
-	GRPCAddr string
-	HTTPAddr string
-	DataDir  string
+	ID             string
+	GRPCAddr       string
+	HTTPAddr       string
+	DataDir        string
+	PreferWorkflow *bool
 }
 
 func NewModule(cfg Config) *Module {
@@ -99,12 +104,22 @@ func NewModule(cfg Config) *Module {
 			cfg.DataDir = "data"
 		}
 	}
+	prefer := true
+	if cfg.PreferWorkflow != nil {
+		prefer = *cfg.PreferWorkflow
+	}
+	if v := os.Getenv("REQUEST_PREFER_WORKFLOW"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			prefer = b
+		}
+	}
 	return &Module{
-		id:       cfg.ID,
-		grpcAddr: cfg.GRPCAddr,
-		httpAddr: cfg.HTTPAddr,
-		dataDir:  cfg.DataDir,
-		requests: make(map[string]*requestRecord),
+		id:             cfg.ID,
+		grpcAddr:       cfg.GRPCAddr,
+		httpAddr:       cfg.HTTPAddr,
+		dataDir:        cfg.DataDir,
+		preferWorkflow: prefer,
+		requests:       make(map[string]*requestRecord),
 	}
 }
 
@@ -112,7 +127,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:             m.id,
 		Name:           "Request Media",
-		Version:      "0.2.5",
+		Version:      "0.2.6",
 		Roles:          []string{"media_request"},
 		Description:    "Web UI and gRPC API for requesting movies and TV shows",
 		Author:         "MuxCore",
@@ -161,6 +176,7 @@ func (m *Module) Init(ctx context.Context) error {
 func (m *Module) Start(ctx context.Context) error {
 	m.grpcSrv = grpc.NewServer()
 	requestmedia.RegisterRequestServiceServer(m.grpcSrv, m)
+	modulesdk.RegisterSettings(m.grpcSrv, m.id, m)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/search", m.handleSearch)
@@ -806,27 +822,29 @@ func (m *Module) tryRunWorkflow(ctx context.Context, definitionID string, input 
 func (m *Module) RequestMovie(ctx context.Context, req *requestmedia.RequestMovieRequest) (*requestmedia.RequestMovieResponse, error) {
 	requestID := fmt.Sprintf("req_mv_%d", time.Now().UnixNano())
 
-	if runID, ok := m.tryRunWorkflow(ctx, "movie-request", map[string]string{
-		"title":      req.GetTitle(),
-		"year":       fmt.Sprintf("%d", req.GetYear()),
-		"tmdb_id":    fmt.Sprintf("%d", req.GetTmdbId()),
-		"request_id": requestID,
-	}); ok {
-		m.saveRequest(&requestRecord{
-			ID: requestID, ItemType: "movie", Title: req.GetTitle(),
-			Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "workflow",
-		})
-		go m.publish(context.Background(), "media.movie.requested", map[string]interface{}{
-			"request_id": requestID, "tmdb_id": req.GetTmdbId(),
-			"title": req.GetTitle(), "year": req.GetYear(), "run_id": runID,
-		})
-		m.tryQueueForAcquisition(ctx, queueParams{
-			ItemType: "movie", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
-			TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
-		})
-		return &requestmedia.RequestMovieResponse{
-			RequestId: requestID, MovieId: "", Status: "workflow",
-		}, nil
+	if m.getPreferWorkflow() {
+		if runID, ok := m.tryRunWorkflow(ctx, "movie-request", map[string]string{
+			"title":      req.GetTitle(),
+			"year":       fmt.Sprintf("%d", req.GetYear()),
+			"tmdb_id":    fmt.Sprintf("%d", req.GetTmdbId()),
+			"request_id": requestID,
+		}); ok {
+			m.saveRequest(&requestRecord{
+				ID: requestID, ItemType: "movie", Title: req.GetTitle(),
+				Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "workflow",
+			})
+			go m.publish(context.Background(), "media.movie.requested", map[string]interface{}{
+				"request_id": requestID, "tmdb_id": req.GetTmdbId(),
+				"title": req.GetTitle(), "year": req.GetYear(), "run_id": runID,
+			})
+			m.tryQueueForAcquisition(ctx, queueParams{
+				ItemType: "movie", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
+				TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
+			})
+			return &requestmedia.RequestMovieResponse{
+				RequestId: requestID, MovieId: "", Status: "workflow",
+			}, nil
+		}
 	}
 
 	addr, err := m.findModuleAddrPrefer(ctx, "media.library.movie", "media.library.movies", "media.library")
@@ -890,29 +908,31 @@ func (m *Module) RequestMovie(ctx context.Context, req *requestmedia.RequestMovi
 
 func (m *Module) RequestTV(ctx context.Context, req *requestmedia.RequestTVRequest) (*requestmedia.RequestTVResponse, error) {
 	requestID := fmt.Sprintf("req_tv_%d", time.Now().UnixNano())
-	if runID, ok := m.tryRunWorkflow(ctx, "tv-request", map[string]string{
-		"title":          req.GetTitle(),
-		"year":           fmt.Sprintf("%d", req.GetYear()),
-		"tmdb_id":        fmt.Sprintf("%d", req.GetTmdbId()),
-		"season_number":  fmt.Sprintf("%d", req.GetSeasonNumber()),
-		"episode_number": fmt.Sprintf("%d", req.GetEpisodeNumber()),
-		"request_id":     requestID,
-	}); ok {
-		m.saveRequest(&requestRecord{
-			ID: requestID, ItemType: "tv", Title: req.GetTitle(),
-			Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "workflow",
-		})
-		go m.publish(context.Background(), "media.tv.requested", map[string]interface{}{
-			"request_id": requestID, "tmdb_id": req.GetTmdbId(),
-			"title": req.GetTitle(), "year": req.GetYear(), "run_id": runID,
-			"season_number": req.GetSeasonNumber(), "episode_number": req.GetEpisodeNumber(),
-		})
-		m.tryQueueForAcquisition(ctx, queueParams{
-			ItemType: "tv", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
-			TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
-			SeasonNumber: req.GetSeasonNumber(), EpisodeNumber: req.GetEpisodeNumber(),
-		})
-		return &requestmedia.RequestTVResponse{RequestId: requestID, Status: "workflow"}, nil
+	if m.getPreferWorkflow() {
+		if runID, ok := m.tryRunWorkflow(ctx, "tv-request", map[string]string{
+			"title":          req.GetTitle(),
+			"year":           fmt.Sprintf("%d", req.GetYear()),
+			"tmdb_id":        fmt.Sprintf("%d", req.GetTmdbId()),
+			"season_number":  fmt.Sprintf("%d", req.GetSeasonNumber()),
+			"episode_number": fmt.Sprintf("%d", req.GetEpisodeNumber()),
+			"request_id":     requestID,
+		}); ok {
+			m.saveRequest(&requestRecord{
+				ID: requestID, ItemType: "tv", Title: req.GetTitle(),
+				Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "workflow",
+			})
+			go m.publish(context.Background(), "media.tv.requested", map[string]interface{}{
+				"request_id": requestID, "tmdb_id": req.GetTmdbId(),
+				"title": req.GetTitle(), "year": req.GetYear(), "run_id": runID,
+				"season_number": req.GetSeasonNumber(), "episode_number": req.GetEpisodeNumber(),
+			})
+			m.tryQueueForAcquisition(ctx, queueParams{
+				ItemType: "tv", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
+				TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
+				SeasonNumber: req.GetSeasonNumber(), EpisodeNumber: req.GetEpisodeNumber(),
+			})
+			return &requestmedia.RequestTVResponse{RequestId: requestID, Status: "workflow"}, nil
+		}
 	}
 
 	addr, err := m.findModuleAddr(ctx, "media.library.tv")
