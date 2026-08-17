@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -34,20 +33,20 @@ import (
 type Module struct {
 	requestmedia.UnimplementedRequestServiceServer
 
-	mu    sync.RWMutex
-	cfgMu sync.RWMutex
-	mc    *client.Client
-	store *reqstore.Store
-	id    string
-	grpcAddr string
-	httpAddr string
-	dataDir  string
+	mu             sync.RWMutex
+	cfgMu          sync.RWMutex
+	mc             *client.Client
+	store          *reqstore.Store
+	id             string
+	grpcAddr       string
+	httpAddr       string
+	dataDir        string
 	preferWorkflow bool
-	requests map[string]*requestRecord
-	grpcSrv  *grpc.Server
-	httpSrv  *http.Server
-	lis      net.Listener
-	httpLis  net.Listener
+	requests       map[string]*requestRecord
+	grpcSrv        *grpc.Server
+	httpSrv        *http.Server
+	lis            net.Listener
+	httpLis        net.Listener
 
 	// findAddr overrides capability discovery in tests.
 	findAddr func(ctx context.Context, capability string) (string, error)
@@ -128,7 +127,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:             m.id,
 		Name:           "Request Media",
-		Version:      "0.2.7",
+		Version:        "0.2.7",
 		Roles:          []string{"media_request"},
 		Description:    "Web UI and gRPC API for requesting movies and TV shows",
 		Author:         "MuxCore",
@@ -436,13 +435,13 @@ func (m *Module) metadataClient(ctx context.Context) (metadatav1.MetadataService
 // --- HTTP Handlers ---
 
 type searchResult struct {
-	ID       int32   `json:"id"`
-	Title    string  `json:"title"`
-	Year     int32   `json:"year"`
-	Overview string  `json:"overview"`
-	Poster   string  `json:"poster"`
-	VoteAvg  float64 `json:"voteAvg"`
-	Type     string  `json:"type,omitempty"`
+	ID        int32   `json:"id"`
+	Title     string  `json:"title"`
+	Year      int32   `json:"year"`
+	Overview  string  `json:"overview"`
+	Poster    string  `json:"poster"`
+	VoteAvg   float64 `json:"voteAvg"`
+	MediaType string  `json:"mediaType"`
 }
 
 func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -456,14 +455,6 @@ func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mediaType := metadatav1.MediaType_MEDIA_TYPE_MOVIE
-	resultType := "movie"
-	switch strings.ToLower(r.URL.Query().Get("type")) {
-	case "tv", "show", "series":
-		mediaType = metadatav1.MediaType_MEDIA_TYPE_TV
-		resultType = "tv"
-	}
-
 	client, conn, err := m.metadataClient(r.Context())
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -473,9 +464,10 @@ func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	reqType := searchTypeFromQuery(r.URL.Query().Get("type"))
 	resp, err := client.Search(r.Context(), &metadatav1.SearchRequest{
 		Query: q,
-		Type:  mediaType,
+		Type:  reqType,
 		Page:  1,
 	})
 	if err != nil {
@@ -485,25 +477,8 @@ func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := make([]searchResult, 0, len(resp.GetResults()))
-	for _, r := range resp.GetResults() {
-		title := r.GetTitle()
-		if title == "" {
-			title = r.GetName()
-		}
-		date := r.GetReleaseDate()
-		if date == "" {
-			date = r.GetFirstAirDate()
-		}
-		year := extractYear(date)
-		results = append(results, searchResult{
-			ID: r.GetId(), Title: title, Year: year,
-			Overview: r.GetOverview(), Poster: r.GetPosterPath(),
-			VoteAvg: r.GetVoteAverage(), Type: resultType,
-		})
-	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"results": results,
+		"results": mapSearchResults(q, reqType, resp.GetResults()),
 	})
 }
 
@@ -520,21 +495,17 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 		Poster    string `json:"poster"`
 		MediaType string `json:"mediaType"`
 		ItemType  string `json:"itemType"`
-		Type      string `json:"type"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 
-	kind := strings.ToLower(strings.TrimSpace(req.MediaType))
+	kind := req.MediaType
 	if kind == "" {
-		kind = strings.ToLower(strings.TrimSpace(req.ItemType))
+		kind = req.ItemType
 	}
-	if kind == "" {
-		kind = strings.ToLower(strings.TrimSpace(req.Type))
-	}
-	if kind == "tv" || kind == "show" || kind == "series" {
+	if isTVRequest(kind) {
 		gResp, err := m.RequestTV(r.Context(), &requestmedia.RequestTVRequest{
 			TmdbId:   req.TMDBID,
 			Title:    req.Title,
@@ -558,7 +529,6 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 			"requestId": gResp.GetRequestId(),
 			"seriesId":  gResp.GetSeriesId(),
 			"status":    gResp.GetStatus(),
-			"type":      "tv",
 		})
 		return
 	}
@@ -588,7 +558,6 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 		"requestId": gResp.GetRequestId(),
 		"movieId":   gResp.GetMovieId(),
 		"status":    gResp.GetStatus(),
-		"type":      "movie",
 	})
 }
 
@@ -631,8 +600,7 @@ const indexHTML = `<!DOCTYPE html>
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#111;color:#eee;min-height:100vh}
 header{background:#1a1a2e;padding:16px 24px;display:flex;align-items:center;gap:16px;border-bottom:2px solid #e66001}
 header h1{font-size:20px;color:#e66001}
-.search-bar{flex:1;max-width:720px;display:flex;gap:8px;align-items:center}
-.search-bar select{padding:10px 12px;border:1px solid #333;border-radius:6px;background:#222;color:#eee;font-size:14px}
+.search-bar{flex:1;max-width:600px;display:flex;gap:8px}
 .search-bar input{flex:1;padding:10px 14px;border:1px solid #333;border-radius:6px;background:#222;color:#eee;font-size:14px}
 .search-bar input:focus{outline:none;border-color:#e66001}
 .search-bar button{padding:10px 20px;background:#e66001;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600}
@@ -674,11 +642,7 @@ main{display:flex;gap:24px;padding:24px;max-width:1400px;margin:0 auto}
 <header>
 <h1>Request Media</h1>
 <div class="search-bar">
-<select id="mediaType" aria-label="Media type">
-<option value="movie">Movie</option>
-<option value="tv">TV</option>
-</select>
-<input id="searchInput" type="text" placeholder="Search for a movie or series..." autofocus>
+<input id="searchInput" type="text" placeholder="Search for a movie..." autofocus>
 <button id="searchBtn" onclick="search()">Search</button>
 </div>
 </header>
@@ -715,10 +679,9 @@ document.getElementById('searchInput').addEventListener('keydown', function(e) {
 async function search() {
 const q = document.getElementById('searchInput').value.trim();
 if (!q) return;
-const mediaType = document.getElementById('mediaType').value || 'movie';
 document.getElementById('searchBtn').disabled = true;
 try {
-const resp = await fetch('/api/search?q=' + encodeURIComponent(q) + '&type=' + encodeURIComponent(mediaType));
+const resp = await fetch('/api/search?q=' + encodeURIComponent(q));
 const data = await resp.json();
 if (data.error) { renderResults([]); showManualEntry(q, data.error); }
 else { renderResults(data.results || []); hideManualEntry(); }
@@ -772,7 +735,7 @@ const poster = r.poster ? 'https://image.tmdb.org/t/p/w342' + r.poster : '';
 return '<div class="card' + (selectedMovie && selectedMovie.id === r.id ? ' selected' : '') + '" onclick="selectMovie(' + r.id + ')">' +
 '<div class="card-poster">' + (poster ? '<img src="' + poster + '" loading="lazy">' : 'No Poster') + '</div>' +
 '<div class="card-info"><h3>' + esc(r.title) + '</h3>' +
-'<div class="year">' + (r.year || '') + '</div>' +
+'<div class="year">' + (r.year || '') + (r.mediaType === 'tv' ? ' • TV' : ' • Movie') + '</div>' +
 '<div class="rating">★ ' + (r.voteAvg ? r.voteAvg.toFixed(1) : '') + '</div></div></div>';
 }).join('');
 }
@@ -789,13 +752,14 @@ document.getElementById('requestBtn').className = 'request-btn';
 document.getElementById('requestBtn').disabled = false;
 document.getElementById('statusMsg').textContent = '';
 
-fetch('/api/search?q=' + encodeURIComponent(document.getElementById('searchInput').value.trim()) + '&type=' + encodeURIComponent(document.getElementById('mediaType').value || 'movie')).then(r => r.json()).then(data => {
+fetch('/api/search?q=' + encodeURIComponent(document.getElementById('searchInput').value.trim())).then(r => r.json()).then(data => {
 const results = data.results || [];
 const movie = results.find(r => r.id === id);
 if (!movie) return;
 selectedMovie = movie;
 document.getElementById('detailTitle').textContent = movie.title;
-document.getElementById('detailMeta').textContent = (movie.year || '') + ' • TMDB: ' + movie.id;
+document.getElementById('detailMeta').textContent = (movie.year || '') + ' • ' + (movie.mediaType === 'tv' ? 'TV' : 'Movie') + ' • TMDB: ' + movie.id;
+document.getElementById('requestBtn').textContent = movie.mediaType === 'tv' ? 'Request Series' : 'Request Movie';
 document.getElementById('detailRating').textContent = '★ ' + (movie.voteAvg ? movie.voteAvg.toFixed(1) : 'N/A');
 document.getElementById('detailOverview').textContent = movie.overview || 'No overview available.';
 const posterEl = document.getElementById('detailPoster');
@@ -814,7 +778,7 @@ try {
 const resp = await fetch('/api/request', {
 method: 'POST',
 headers: {'Content-Type': 'application/json'},
-body: JSON.stringify({tmdbId: selectedMovie.id, title: selectedMovie.title, year: selectedMovie.year, overview: selectedMovie.overview, poster: selectedMovie.poster, mediaType: document.getElementById('mediaType').value || 'movie'})
+body: JSON.stringify({tmdbId: selectedMovie.id, title: selectedMovie.title, year: selectedMovie.year, overview: selectedMovie.overview, poster: selectedMovie.poster, mediaType: selectedMovie.mediaType || 'movie'})
 });
 const result = await resp.json();
 if (result.status === 'added') {
