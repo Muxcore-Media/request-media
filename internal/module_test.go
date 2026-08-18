@@ -130,12 +130,22 @@ func (s *stubTV) AddTVShow(ctx context.Context, req *tvmgmtv1.AddTVShowRequest) 
 
 type stubAutomation struct {
 	automationv1.UnimplementedAutomationServiceServer
-	last *automationv1.AddToQueueRequest
+	last  *automationv1.AddToQueueRequest
+	queue []*automationv1.QueueItem
+	hist  []*automationv1.DownloadRecord
 }
 
 func (s *stubAutomation) AddToQueue(ctx context.Context, req *automationv1.AddToQueueRequest) (*automationv1.AddToQueueResponse, error) {
 	s.last = req
 	return &automationv1.AddToQueueResponse{QueueId: "q-1"}, nil
+}
+
+func (s *stubAutomation) GetQueue(ctx context.Context, req *automationv1.GetQueueRequest) (*automationv1.GetQueueResponse, error) {
+	return &automationv1.GetQueueResponse{Items: s.queue, Total: int32(len(s.queue)), Page: 1, PageSize: 100}, nil
+}
+
+func (s *stubAutomation) GetHistory(ctx context.Context, req *automationv1.GetHistoryRequest) (*automationv1.GetHistoryResponse, error) {
+	return &automationv1.GetHistoryResponse{Records: s.hist, Total: int32(len(s.hist)), Page: 1, PageSize: 100}, nil
 }
 
 func startGRPC(t *testing.T, register func(*grpc.Server)) string {

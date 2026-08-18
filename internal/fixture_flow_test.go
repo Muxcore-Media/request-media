@@ -187,7 +187,7 @@ func TestAdminHTTP_FixtureMetadata_MovieAndTVFlows(t *testing.T) {
 	if tvSearch.Error != "" || len(tvSearch.Results) != 1 || tvSearch.Results[0].ID != 1396 {
 		t.Fatalf("tv fixture search: %+v", tvSearch)
 	}
-	if tvSearch.Results[0].Title != "Breaking Bad" || tvSearch.Results[0].Type != "tv" {
+	if tvSearch.Results[0].Title != "Breaking Bad" || tvSearch.Results[0].MediaType != "tv" {
 		t.Fatalf("tv result: %+v", tvSearch.Results[0])
 	}
 

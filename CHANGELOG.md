@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.8] — 2026-08-18
+
+### Added
+- Advance request status from `added`/`requested` using media-automation queue + history (`downloading` when a grab is in flight or the library is partial; `available` when no real episodes/movies remain missing). Season-0 dummy wanted rows do not block `available`. Refresh on list/GetStatus and every 60s.
+
 ## [0.2.7] — 2026-08-10
 
 ### Added

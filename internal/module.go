@@ -53,6 +53,7 @@ type Module struct {
 
 	automationClient automationv1.AutomationServiceClient
 	automationConn   *grpc.ClientConn
+	statusCancel     context.CancelFunc
 }
 
 type requestRecord struct {
@@ -127,7 +128,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:             m.id,
 		Name:           "Request Media",
-		Version:        "0.2.7",
+		Version:        "0.2.8",
 		Roles:          []string{"media_request"},
 		Description:    "Web UI and gRPC API for requesting movies and TV shows",
 		Author:         "MuxCore",
@@ -187,6 +188,9 @@ func (m *Module) Start(ctx context.Context) error {
 	m.httpSrv = &http.Server{Handler: mux}
 
 	go m.dialCore(ctx)
+	statusCtx, cancel := context.WithCancel(context.Background())
+	m.statusCancel = cancel
+	go m.statusLoop(statusCtx)
 
 	go func() {
 		slog.Info("request-media gRPC service started", "addr", m.grpcAddr)
@@ -204,6 +208,10 @@ func (m *Module) Start(ctx context.Context) error {
 }
 
 func (m *Module) Stop(ctx context.Context) error {
+	if m.statusCancel != nil {
+		m.statusCancel()
+		m.statusCancel = nil
+	}
 	if m.httpSrv != nil {
 		m.httpSrv.Close()
 	}
@@ -495,6 +503,7 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 		Poster    string `json:"poster"`
 		MediaType string `json:"mediaType"`
 		ItemType  string `json:"itemType"`
+		Type      string `json:"type"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
@@ -504,6 +513,9 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 	kind := req.MediaType
 	if kind == "" {
 		kind = req.ItemType
+	}
+	if kind == "" {
+		kind = req.Type
 	}
 	if isTVRequest(kind) {
 		gResp, err := m.RequestTV(r.Context(), &requestmedia.RequestTVRequest{
@@ -529,6 +541,8 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 			"requestId": gResp.GetRequestId(),
 			"seriesId":  gResp.GetSeriesId(),
 			"status":    gResp.GetStatus(),
+			"itemType":  "tv",
+			"type":      "tv",
 		})
 		return
 	}
@@ -558,6 +572,8 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 		"requestId": gResp.GetRequestId(),
 		"movieId":   gResp.GetMovieId(),
 		"status":    gResp.GetStatus(),
+		"itemType":  "movie",
+		"type":      "movie",
 	})
 }
 
@@ -566,6 +582,9 @@ func (m *Module) handleRequests(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	refreshCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	m.refreshAcquisitionStatus(refreshCtx)
+	cancel()
 	m.mu.RLock()
 	list := make([]*requestRecord, 0, len(m.requests))
 	for _, rec := range m.requests {
@@ -635,6 +654,8 @@ main{display:flex;gap:24px;padding:24px;max-width:1400px;margin:0 auto}
 .history-item .status{font-size:11px;padding:2px 6px;border-radius:4px}
 .history-item .status.added{background:#1a4a1a;color:#4caf50}
 .history-item .status.requested{background:#4a3a1a;color:#ff9800}
+.history-item .status.downloading{background:#1a3a4a;color:#4fc3f7}
+.history-item .status.available{background:#1a4a3a;color:#69f0ae}
 @media(max-width:900px){main{flex-direction:column}.detail-panel{width:100%;position:static}}
 </style>
 </head>
@@ -1024,6 +1045,9 @@ func (m *Module) RequestTV(ctx context.Context, req *requestmedia.RequestTVReque
 }
 
 func (m *Module) GetStatus(ctx context.Context, req *requestmedia.GetStatusRequest) (*requestmedia.GetStatusResponse, error) {
+	refreshCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	m.refreshAcquisitionStatus(refreshCtx)
+	cancel()
 	m.mu.RLock()
 	rec, ok := m.requests[req.GetRequestId()]
 	m.mu.RUnlock()
