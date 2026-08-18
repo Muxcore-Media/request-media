@@ -12,8 +12,10 @@ import (
 func statusRank(s string) int {
 	switch s {
 	case "available":
-		return 3
+		return 4
 	case "downloading":
+		return 3
+	case "searching", "queued":
 		return 2
 	case "added":
 		return 1
@@ -83,6 +85,9 @@ func deriveAcquisitionStatus(itemType string, tmdb int32, title string, queue []
 	}
 	if hasSent || (owned > 0 && missing > 0) || (hasCompleted && missing > 0) {
 		return "downloading"
+	}
+	if missing > 0 {
+		return "searching"
 	}
 	return ""
 }

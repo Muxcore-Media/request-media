@@ -67,6 +67,26 @@ func TestDeriveAcquisitionStatus_TVPartialDownloading(t *testing.T) {
 	}
 }
 
+func TestDeriveAcquisitionStatus_MissingWantedIsSearching(t *testing.T) {
+	got := deriveAcquisitionStatus("tv", 100, "Little Bear",
+		[]*automationv1.QueueItem{{ItemType: "tv", ItemId: "pack", TmdbId: 100, SeasonNumber: 1, EpisodeNumber: 0, Missing: true}},
+		nil,
+	)
+	if got != "searching" {
+		t.Fatalf("got %q, want searching", got)
+	}
+}
+
+func TestDeriveAcquisitionStatus_MovieMissingIsSearching(t *testing.T) {
+	got := deriveAcquisitionStatus("movie", 218, "The Terminator",
+		[]*automationv1.QueueItem{{ItemType: "movie", ItemId: "m1", TmdbId: 218, Missing: true}},
+		nil,
+	)
+	if got != "searching" {
+		t.Fatalf("got %q, want searching", got)
+	}
+}
+
 func TestDeriveAcquisitionStatus_NoQueueMatch(t *testing.T) {
 	got := deriveAcquisitionStatus("movie", 1, "Nope",
 		[]*automationv1.QueueItem{{ItemType: "movie", ItemId: "m1", TmdbId: 999, Missing: true}},

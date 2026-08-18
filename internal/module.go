@@ -128,7 +128,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:             m.id,
 		Name:           "Request Media",
-		Version:        "0.2.10",
+		Version:        "0.2.11",
 		Roles:          []string{"media_request"},
 		Description:    "Web UI and gRPC API for requesting movies and TV shows",
 		Author:         "MuxCore",
@@ -665,6 +665,8 @@ main{display:flex;gap:24px;padding:24px;max-width:1400px;margin:0 auto}
 .history-item .status{font-size:11px;padding:2px 6px;border-radius:4px}
 .history-item .status.added{background:#1a4a1a;color:#4caf50}
 .history-item .status.requested{background:#4a3a1a;color:#ff9800}
+.history-item .status.searching{background:#3a3a1a;color:#ffd54f}
+.history-item .status.queued{background:#3a3a1a;color:#ffd54f}
 .history-item .status.downloading{background:#1a3a4a;color:#4fc3f7}
 .history-item .status.available{background:#1a4a3a;color:#69f0ae}
 @media(max-width:900px){main{flex-direction:column}.detail-panel{width:100%;position:static}}

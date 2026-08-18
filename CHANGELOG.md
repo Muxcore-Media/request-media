@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.11] — 2026-08-18
+
+### Fixed
+- Requests with a matching missing wanted row and no in-flight grab show `searching` instead of staying `added`.
+
 ## [0.2.10] — 2026-08-18
 
 ### Fixed
