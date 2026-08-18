@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.10] — 2026-08-18
+
+### Fixed
+- TV requests with season 0 and a dummy episode (`S00E12`) enqueue a series pack (`episode == 0`) instead of a placeholder wanted row.
+
 ## [0.2.9] — 2026-08-18
 
 ### Fixed

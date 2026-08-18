@@ -383,3 +383,46 @@ func TestRequestTV_QueuesAutomationAfterAdd(t *testing.T) {
 	}
 }
 
+func TestRequestTV_SeasonZeroDummyQueuesPack(t *testing.T) {
+	m := testModule(t)
+	tvStub := &stubTV{}
+	autoStub := &stubAutomation{}
+	tvAddr := startGRPC(t, func(s *grpc.Server) {
+		tvmgmtv1.RegisterTvManagementServiceServer(s, tvStub)
+	})
+	autoAddr := startGRPC(t, func(s *grpc.Server) {
+		automationv1.RegisterAutomationServiceServer(s, autoStub)
+	})
+	m.findAddr = func(ctx context.Context, capability string) (string, error) {
+		switch capability {
+		case "media.library.tv":
+			return tvAddr, nil
+		case "media.automation":
+			return autoAddr, nil
+		case "workflow.engine":
+			return "", fmt.Errorf("no workflow")
+		default:
+			return "", fmt.Errorf("no %s", capability)
+		}
+	}
+	resp, err := m.RequestTV(context.Background(), &requestmedia.RequestTVRequest{
+		TmdbId: 253, Title: "Star Trek", Year: 1966, SeasonNumber: 0, EpisodeNumber: 12,
+	})
+	if err != nil {
+		t.Fatalf("RequestTV: %v", err)
+	}
+	if resp.GetStatus() != "added" {
+		t.Fatalf("resp = %+v", resp)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for autoStub.last == nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if autoStub.last == nil {
+		t.Fatal("AddToQueue not called")
+	}
+	if autoStub.last.GetSeasonNumber() != 0 || autoStub.last.GetEpisodeNumber() != 0 {
+		t.Fatalf("expected pack grain 0/0, got S%02dE%02d", autoStub.last.GetSeasonNumber(), autoStub.last.GetEpisodeNumber())
+	}
+}
+

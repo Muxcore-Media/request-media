@@ -128,7 +128,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:             m.id,
 		Name:           "Request Media",
-		Version:        "0.2.9",
+		Version:        "0.2.10",
 		Roles:          []string{"media_request"},
 		Description:    "Web UI and gRPC API for requesting movies and TV shows",
 		Author:         "MuxCore",
@@ -396,6 +396,13 @@ func (m *Module) tryQueueForAcquisition(ctx context.Context, p queueParams) {
 	go m.queueForAcquisitionAsync(p)
 }
 
+func tvAcquisitionGrain(season, episode int32) (int32, int32) {
+	if season == 0 && episode >= 1 {
+		return 0, 0
+	}
+	return season, episode
+}
+
 func (m *Module) queueForAcquisitionAsync(p queueParams) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -410,14 +417,18 @@ func (m *Module) queueForAcquisitionAsync(p queueParams) {
 		slog.Warn("request-media: automation client nil", "title", p.Title)
 		return
 	}
+	season, episode := p.SeasonNumber, p.EpisodeNumber
+	if p.ItemType == "tv" {
+		season, episode = tvAcquisitionGrain(p.SeasonNumber, p.EpisodeNumber)
+	}
 	resp, err := ac.AddToQueue(ctx, &automationv1.AddToQueueRequest{
 		ItemType:         p.ItemType,
 		ItemId:           p.ItemID,
 		TmdbId:           p.TmdbID,
 		Title:            p.Title,
 		Year:             p.Year,
-		SeasonNumber:     p.SeasonNumber,
-		EpisodeNumber:    p.EpisodeNumber,
+		SeasonNumber:     season,
+		EpisodeNumber:    episode,
 		QualityProfileId: p.QualityProfileID,
 	})
 	if err != nil {
