@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.9] — 2026-08-18
+
+### Fixed
+- Treat `stalled` and `import_failed` automation history as `downloading` so requests with an in-flight or stuck grab leave `added`.
+
 ## [0.2.8] — 2026-08-18
 
 ### Added

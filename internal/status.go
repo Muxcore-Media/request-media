@@ -72,7 +72,7 @@ func deriveAcquisitionStatus(itemType string, tmdb int32, title string, queue []
 			continue
 		}
 		switch h.GetStatus() {
-		case "sent":
+		case "sent", "stalled", "import_failed":
 			hasSent = true
 		case "completed":
 			hasCompleted = true

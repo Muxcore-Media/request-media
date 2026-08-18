@@ -21,6 +21,16 @@ func TestDeriveAcquisitionStatus_MovieDownloading(t *testing.T) {
 	}
 }
 
+func TestDeriveAcquisitionStatus_StalledIsDownloading(t *testing.T) {
+	got := deriveAcquisitionStatus("tv", 39297, "Last Man Standing",
+		[]*automationv1.QueueItem{{ItemType: "tv", ItemId: "s00", TmdbId: 39297, SeasonNumber: 0, EpisodeNumber: 1, Missing: true}},
+		[]*automationv1.DownloadRecord{{WantedItemId: "s00", Status: "stalled"}},
+	)
+	if got != "downloading" {
+		t.Fatalf("got %q, want downloading", got)
+	}
+}
+
 func TestDeriveAcquisitionStatus_MovieAvailable(t *testing.T) {
 	got := deriveAcquisitionStatus("movie", 218, "The Terminator",
 		[]*automationv1.QueueItem{{ItemType: "movie", ItemId: "m1", TmdbId: 218, Missing: false}},
