@@ -61,8 +61,67 @@ func TestRequestMovie_PersistsWhenLibraryUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetStatus after reload: %v", err)
 	}
-	if st2.GetTitle() != "The Terminator" {
+	if st.GetTitle() != "The Terminator" {
 		t.Fatalf("persisted title = %q", st2.GetTitle())
+	}
+}
+
+func TestRequestMovie_ReusesExistingTMDB(t *testing.T) {
+	m := testModule(t)
+	first, err := m.RequestMovie(context.Background(), &requestmedia.RequestMovieRequest{
+		TmdbId: 218, Title: "The Terminator", Year: 1984,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := m.RequestMovie(context.Background(), &requestmedia.RequestMovieRequest{
+		TmdbId: 218, Title: "The Terminator", Year: 1984,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.GetRequestId() == "" || first.GetRequestId() != second.GetRequestId() {
+		t.Fatalf("expected same request id, got %q then %q", first.GetRequestId(), second.GetRequestId())
+	}
+	m.mu.RLock()
+	n := len(uniqueRequestList(func() []*requestRecord {
+		out := make([]*requestRecord, 0, len(m.requests))
+		for _, rec := range m.requests {
+			out = append(out, rec)
+		}
+		return out
+	}()))
+	m.mu.RUnlock()
+	if n != 1 {
+		t.Fatalf("request map len = %d, want 1", n)
+	}
+}
+
+func TestRequestSameNameMovieAndTVStaySeparate(t *testing.T) {
+	m := testModule(t)
+	mv, err := m.RequestMovie(context.Background(), &requestmedia.RequestMovieRequest{
+		TmdbId: 11688, Title: "The Adventures of Paddington Bear", Year: 2014,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tv, err := m.RequestTV(context.Background(), &requestmedia.RequestTVRequest{
+		TmdbId: 65334, Title: "The Adventures of Paddington Bear", Year: 1997,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mv.GetRequestId() == tv.GetRequestId() {
+		t.Fatal("movie and TV must be separate rows")
+	}
+	m.mu.RLock()
+	list := uniqueRequestList([]*requestRecord{
+		m.requests[mv.GetRequestId()],
+		m.requests[tv.GetRequestId()],
+	})
+	m.mu.RUnlock()
+	if len(list) != 2 {
+		t.Fatalf("unique list len = %d, want 2", len(list))
 	}
 }
 

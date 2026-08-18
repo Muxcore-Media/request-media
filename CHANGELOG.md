@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.12] — 2026-08-18
+
+### Fixed
+- Requesting an already-requested TMDB + type returns the existing row instead of cloning it. List hides duplicates. Movie and TV with the same name stay two rows.
+
 ## [0.2.11] — 2026-08-18
 
 ### Fixed

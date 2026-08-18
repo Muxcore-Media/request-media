@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -128,7 +129,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:             m.id,
 		Name:           "Request Media",
-		Version:        "0.2.11",
+		Version:        "0.2.12",
 		Roles:          []string{"media_request"},
 		Description:    "Web UI and gRPC API for requesting movies and TV shows",
 		Author:         "MuxCore",
@@ -322,6 +323,86 @@ func (m *Module) findModuleAddrPrefer(ctx context.Context, capabilities ...strin
 		lastErr = fmt.Errorf("no module found")
 	}
 	return "", lastErr
+}
+
+func requestDedupeKey(itemType string, tmdb int32, title string, year int32) string {
+	kind := strings.ToLower(strings.TrimSpace(itemType))
+	if tmdb > 0 {
+		return fmt.Sprintf("%s:tmdb:%d", kind, tmdb)
+	}
+	return fmt.Sprintf("%s:title:%s:%d", kind, strings.ToLower(strings.TrimSpace(title)), year)
+}
+
+func (m *Module) findExisting(itemType string, tmdb int32, title string, year int32) *requestRecord {
+	key := requestDedupeKey(itemType, tmdb, title, year)
+	if key == "" {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var found *requestRecord
+	for _, rec := range m.requests {
+		if rec == nil {
+			continue
+		}
+		if requestDedupeKey(rec.ItemType, rec.TMDBID, rec.Title, rec.Year) != key {
+			continue
+		}
+		if found == nil {
+			found = rec
+			continue
+		}
+		_, loser := reqstorePrefer(found, rec)
+		if loser == found {
+			found = rec
+		}
+	}
+	return found
+}
+
+func reqstorePrefer(a, b *requestRecord) (keep, drop *requestRecord) {
+	if a == nil {
+		return b, a
+	}
+	if b == nil {
+		return a, b
+	}
+	aHas := strings.TrimSpace(a.ItemID) != ""
+	bHas := strings.TrimSpace(b.ItemID) != ""
+	if aHas != bHas {
+		if aHas {
+			return a, b
+		}
+		return b, a
+	}
+	if a.CreatedAt.Before(b.CreatedAt) || (a.CreatedAt.Equal(b.CreatedAt) && a.ID <= b.ID) {
+		return a, b
+	}
+	return b, a
+}
+
+func uniqueRequestList(in []*requestRecord) []*requestRecord {
+	best := make(map[string]*requestRecord, len(in))
+	order := make([]string, 0, len(in))
+	for _, rec := range in {
+		if rec == nil {
+			continue
+		}
+		k := requestDedupeKey(rec.ItemType, rec.TMDBID, rec.Title, rec.Year)
+		prev, ok := best[k]
+		if !ok {
+			best[k] = rec
+			order = append(order, k)
+			continue
+		}
+		keep, _ := reqstorePrefer(prev, rec)
+		best[k] = keep
+	}
+	out := make([]*requestRecord, 0, len(order))
+	for _, k := range order {
+		out = append(out, best[k])
+	}
+	return out
 }
 
 func (m *Module) saveRequest(rec *requestRecord) {
@@ -602,6 +683,7 @@ func (m *Module) handleRequests(w http.ResponseWriter, r *http.Request) {
 		list = append(list, rec)
 	}
 	m.mu.RUnlock()
+	list = uniqueRequestList(list)
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].CreatedAt.After(list[j].CreatedAt)
 	})
@@ -882,6 +964,12 @@ func (m *Module) tryRunWorkflow(ctx context.Context, definitionID string, input 
 }
 
 func (m *Module) RequestMovie(ctx context.Context, req *requestmedia.RequestMovieRequest) (*requestmedia.RequestMovieResponse, error) {
+	if existing := m.findExisting("movie", req.GetTmdbId(), req.GetTitle(), req.GetYear()); existing != nil {
+		slog.Info("movie already requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId(), "request_id", existing.ID)
+		return &requestmedia.RequestMovieResponse{
+			RequestId: existing.ID, MovieId: existing.ItemID, Status: existing.Status,
+		}, nil
+	}
 	requestID := fmt.Sprintf("req_mv_%d", time.Now().UnixNano())
 
 	if m.getPreferWorkflow() {
@@ -969,6 +1057,12 @@ func (m *Module) RequestMovie(ctx context.Context, req *requestmedia.RequestMovi
 }
 
 func (m *Module) RequestTV(ctx context.Context, req *requestmedia.RequestTVRequest) (*requestmedia.RequestTVResponse, error) {
+	if existing := m.findExisting("tv", req.GetTmdbId(), req.GetTitle(), req.GetYear()); existing != nil {
+		slog.Info("tv already requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId(), "request_id", existing.ID)
+		return &requestmedia.RequestTVResponse{
+			RequestId: existing.ID, SeriesId: existing.ItemID, Status: existing.Status,
+		}, nil
+	}
 	requestID := fmt.Sprintf("req_tv_%d", time.Now().UnixNano())
 	if m.getPreferWorkflow() {
 		if runID, ok := m.tryRunWorkflow(ctx, "tv-request", map[string]string{

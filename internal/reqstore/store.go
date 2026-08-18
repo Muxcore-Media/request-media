@@ -3,6 +3,7 @@ package reqstore
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -59,6 +60,9 @@ func (s *Store) migrate() error {
 	`)
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
+	}
+	if err := s.pruneDuplicates(); err != nil {
+		return fmt.Errorf("prune duplicate requests: %w", err)
 	}
 	return nil
 }
@@ -128,6 +132,101 @@ func (s *Store) List() ([]*Record, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// Delete removes a request by ID.
+func (s *Store) Delete(id string) error {
+	if id == "" {
+		return fmt.Errorf("id is required")
+	}
+	_, err := s.db.Exec(`DELETE FROM requests WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete request: %w", err)
+	}
+	return nil
+}
+
+// FindByTMDB returns the existing request for item type + TMDB id, if any.
+func (s *Store) FindByTMDB(itemType string, tmdbID int32) (*Record, error) {
+	if tmdbID <= 0 {
+		return nil, nil
+	}
+	row := s.db.QueryRow(`
+		SELECT id, item_type, item_id, tmdb_id, title, year, poster, status, created_at, updated_at
+		FROM requests WHERE item_type = ? AND tmdb_id = ? ORDER BY created_at ASC LIMIT 1
+	`, itemType, tmdbID)
+	r, err := scanRecord(row)
+	if err != nil {
+		if strings.Contains(err.Error(), "request not found") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return r, nil
+}
+
+func requestDedupeKey(r *Record) string {
+	if r == nil {
+		return ""
+	}
+	kind := strings.ToLower(strings.TrimSpace(r.ItemType))
+	if r.TMDBID > 0 {
+		return fmt.Sprintf("%s:tmdb:%d", kind, r.TMDBID)
+	}
+	title := strings.ToLower(strings.TrimSpace(r.Title))
+	return fmt.Sprintf("%s:title:%s:%d", kind, title, r.Year)
+}
+
+func betterRequest(a, b *Record) (keep, drop *Record) {
+	if a == nil {
+		return b, a
+	}
+	if b == nil {
+		return a, b
+	}
+	aHas := strings.TrimSpace(a.ItemID) != ""
+	bHas := strings.TrimSpace(b.ItemID) != ""
+	if aHas != bHas {
+		if aHas {
+			return a, b
+		}
+		return b, a
+	}
+	if a.CreatedAt.Before(b.CreatedAt) || (a.CreatedAt.Equal(b.CreatedAt) && a.ID <= b.ID) {
+		return a, b
+	}
+	return b, a
+}
+
+func (s *Store) pruneDuplicates() error {
+	list, err := s.List()
+	if err != nil {
+		return err
+	}
+	keep := make(map[string]*Record, len(list))
+	var drop []string
+	for _, r := range list {
+		k := requestDedupeKey(r)
+		if k == "" {
+			continue
+		}
+		prev, ok := keep[k]
+		if !ok {
+			keep[k] = r
+			continue
+		}
+		winner, loser := betterRequest(prev, r)
+		keep[k] = winner
+		if loser != nil && loser.ID != "" {
+			drop = append(drop, loser.ID)
+		}
+	}
+	for _, id := range drop {
+		if _, err := s.db.Exec(`DELETE FROM requests WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("delete duplicate %s: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // LoadAll returns a map of all requests keyed by ID.

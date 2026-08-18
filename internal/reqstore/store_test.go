@@ -82,3 +82,43 @@ func TestLoadAllPersistsAcrossOpen(t *testing.T) {
 		t.Fatalf("LoadAll missing: %+v", all)
 	}
 }
+
+func TestPruneDuplicateTMDBRows(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "requests.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	old := time.Now().UTC().Add(-time.Hour)
+	newer := time.Now().UTC()
+	if err := s.Put(&Record{ID: "star-a", ItemType: "tv", TMDBID: 253, Title: "Star Trek", Status: "requested", CreatedAt: old}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Put(&Record{ID: "star-b", ItemType: "tv", TMDBID: 253, Title: "Star Trek", ItemID: "series-1", Status: "added", CreatedAt: newer}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Put(&Record{ID: "star-movie", ItemType: "movie", TMDBID: 253, Title: "Star Trek", Status: "requested", CreatedAt: old}); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer s2.Close()
+	all, err := s2.LoadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("after prune len=%d want 2 (tv+movie), got %+v", len(all), all)
+	}
+	if all["star-b"] == nil {
+		t.Fatalf("should keep tv row with item_id, got %+v", all)
+	}
+	if all["star-movie"] == nil {
+		t.Fatalf("movie row must remain, got %+v", all)
+	}
+}
