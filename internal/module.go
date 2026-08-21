@@ -9,8 +9,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,12 +18,11 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/Muxcore-Media/core/pkg/contracts"
+	"github.com/Muxcore-Media/core/pkg/tenant"
 	workflowv1 "github.com/Muxcore-Media/core/proto/gen/muxcore/workflow/v1"
 	"github.com/Muxcore-Media/core/sdk/go/client"
 	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
 	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
-	mgmntv1 "github.com/Muxcore-Media/media-movies/proto/mgmntv1"
-	tvmgmtv1 "github.com/Muxcore-Media/media-tvshows/proto/tvmgmtv1"
 	metadatav1 "github.com/Muxcore-Media/metadata-tmdb/proto/metadatav1"
 	"github.com/Muxcore-Media/request-media/internal/reqstore"
 	requestmedia "github.com/Muxcore-Media/request-media/proto/requestmedia"
@@ -37,17 +34,18 @@ type Module struct {
 	mu             sync.RWMutex
 	cfgMu          sync.RWMutex
 	mc             *client.Client
-	store          *reqstore.Store
+	store          *reqstore.Partitions
 	id             string
 	grpcAddr       string
 	httpAddr       string
 	dataDir        string
-	preferWorkflow bool
-	requests       map[string]*requestRecord
-	grpcSrv        *grpc.Server
-	httpSrv        *http.Server
-	lis            net.Listener
-	httpLis        net.Listener
+	preferWorkflow  bool
+	requireApproval bool
+	requests        map[string]*requestRecord
+	grpcSrv         *grpc.Server
+	httpSrv         *http.Server
+	lis             net.Listener
+	httpLis         net.Listener
 
 	// findAddr overrides capability discovery in tests.
 	findAddr func(ctx context.Context, capability string) (string, error)
@@ -58,24 +56,30 @@ type Module struct {
 }
 
 type requestRecord struct {
-	ID        string    `json:"id"`
-	ItemType  string    `json:"itemType"`
-	ItemID    string    `json:"itemId"`
-	TMDBID    int32     `json:"tmdbId"`
-	Title     string    `json:"title"`
-	Year      int32     `json:"year"`
-	Poster    string    `json:"poster"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID          string    `json:"id"`
+	ItemType    string    `json:"itemType"`
+	ItemID      string    `json:"itemId"`
+	TMDBID      int32     `json:"tmdbId"`
+	Title       string    `json:"title"`
+	Year        int32     `json:"year"`
+	Overview    string    `json:"overview,omitempty"`
+	Poster      string    `json:"poster"`
+	Status      string    `json:"status"`
+	RequestedBy string    `json:"requestedBy,omitempty"`
+	ApprovedBy  string    `json:"approvedBy,omitempty"`
+	ApprovedAt  time.Time `json:"approvedAt,omitempty"`
+	TenantID    string    `json:"tenantId,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 type Config struct {
-	ID             string
-	GRPCAddr       string
-	HTTPAddr       string
-	DataDir        string
-	PreferWorkflow *bool
+	ID              string
+	GRPCAddr        string
+	HTTPAddr        string
+	DataDir         string
+	PreferWorkflow  *bool
+	RequireApproval *bool
 }
 
 func NewModule(cfg Config) *Module {
@@ -115,13 +119,23 @@ func NewModule(cfg Config) *Module {
 			prefer = b
 		}
 	}
+	requireApproval := false
+	if cfg.RequireApproval != nil {
+		requireApproval = *cfg.RequireApproval
+	}
+	if v := os.Getenv("REQUEST_REQUIRE_APPROVAL"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			requireApproval = b
+		}
+	}
 	return &Module{
-		id:             cfg.ID,
-		grpcAddr:       cfg.GRPCAddr,
-		httpAddr:       cfg.HTTPAddr,
-		dataDir:        cfg.DataDir,
-		preferWorkflow: prefer,
-		requests:       make(map[string]*requestRecord),
+		id:              cfg.ID,
+		grpcAddr:        cfg.GRPCAddr,
+		httpAddr:        cfg.HTTPAddr,
+		dataDir:         cfg.DataDir,
+		preferWorkflow:  prefer,
+		requireApproval: requireApproval,
+		requests:        make(map[string]*requestRecord),
 	}
 }
 
@@ -129,7 +143,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:             m.id,
 		Name:           "Request Media",
-		Version:        "0.2.12",
+		Version:        "0.3.0",
 		Roles:          []string{"media_request"},
 		Description:    "Web UI and gRPC API for requesting movies and TV shows",
 		Author:         "MuxCore",
@@ -143,13 +157,13 @@ func (m *Module) Init(ctx context.Context) error {
 	if err := os.MkdirAll(m.dataDir, 0o755); err != nil {
 		return fmt.Errorf("create data dir %s: %w", m.dataDir, err)
 	}
-	store, err := reqstore.Open(filepath.Join(m.dataDir, "requests.db"))
+	store, err := reqstore.OpenPartitions(m.dataDir)
 	if err != nil {
 		return fmt.Errorf("open request store: %w", err)
 	}
 	loaded, err := store.LoadAll()
 	if err != nil {
-		store.Close()
+		_ = store.Close()
 		return fmt.Errorf("load requests: %w", err)
 	}
 	m.store = store
@@ -182,11 +196,13 @@ func (m *Module) Start(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/search", m.handleSearch)
+	mux.HandleFunc("/api/discover/", m.handleDiscover)
 	mux.HandleFunc("/api/request", m.handleRequest)
+	mux.HandleFunc("/api/requests/", m.handleRequestAction)
 	mux.HandleFunc("/api/requests", m.handleRequests)
 	mux.HandleFunc("/", m.handleIndex)
 
-	m.httpSrv = &http.Server{Handler: mux}
+	m.httpSrv = &http.Server{Handler: tenant.Middleware(mux)}
 
 	go m.dialCore(ctx)
 	statusCtx, cancel := context.WithCancel(context.Background())
@@ -226,7 +242,7 @@ func (m *Module) Stop(ctx context.Context) error {
 		m.automationConn.Close()
 	}
 	if m.store != nil {
-		m.store.Close()
+		_ = m.store.Close()
 	}
 	slog.Info("request-media stopped")
 	return nil
@@ -325,16 +341,35 @@ func (m *Module) findModuleAddrPrefer(ctx context.Context, capabilities ...strin
 	return "", lastErr
 }
 
-func requestDedupeKey(itemType string, tmdb int32, title string, year int32) string {
+func requestDedupeKey(itemType string, tmdb int32, title string, year int32, tenantID string) string {
 	kind := strings.ToLower(strings.TrimSpace(itemType))
+	prefix := strings.TrimSpace(tenantID) + ":"
 	if tmdb > 0 {
-		return fmt.Sprintf("%s:tmdb:%d", kind, tmdb)
+		return fmt.Sprintf("%s%s:tmdb:%d", prefix, kind, tmdb)
 	}
-	return fmt.Sprintf("%s:title:%s:%d", kind, strings.ToLower(strings.TrimSpace(title)), year)
+	return fmt.Sprintf("%s%s:title:%s:%d", prefix, kind, strings.ToLower(strings.TrimSpace(title)), year)
 }
 
-func (m *Module) findExisting(itemType string, tmdb int32, title string, year int32) *requestRecord {
-	key := requestDedupeKey(itemType, tmdb, title, year)
+func (m *Module) resolveTenant(ctx context.Context, headers http.Header) string {
+	if !tenant.Enabled() {
+		return ""
+	}
+	if id := tenant.IDFrom(ctx); id != "" {
+		return id
+	}
+	if headers != nil {
+		if id := strings.TrimSpace(headers.Get("X-Tenant-ID")); id != "" {
+			return id
+		}
+		if id := strings.TrimSpace(headers.Get("X-Auth-Claims-Tenant")); id != "" {
+			return id
+		}
+	}
+	return "default"
+}
+
+func (m *Module) findExisting(itemType string, tmdb int32, title string, year int32, tenantID string) *requestRecord {
+	key := requestDedupeKey(itemType, tmdb, title, year, tenantID)
 	if key == "" {
 		return nil
 	}
@@ -345,7 +380,7 @@ func (m *Module) findExisting(itemType string, tmdb int32, title string, year in
 		if rec == nil {
 			continue
 		}
-		if requestDedupeKey(rec.ItemType, rec.TMDBID, rec.Title, rec.Year) != key {
+		if requestDedupeKey(rec.ItemType, rec.TMDBID, rec.Title, rec.Year, rec.TenantID) != key {
 			continue
 		}
 		if found == nil {
@@ -388,7 +423,7 @@ func uniqueRequestList(in []*requestRecord) []*requestRecord {
 		if rec == nil {
 			continue
 		}
-		k := requestDedupeKey(rec.ItemType, rec.TMDBID, rec.Title, rec.Year)
+		k := requestDedupeKey(rec.ItemType, rec.TMDBID, rec.Title, rec.Year, rec.TenantID)
 		prev, ok := best[k]
 		if !ok {
 			best[k] = rec
@@ -426,7 +461,8 @@ func toStoreRecord(r *requestRecord) *reqstore.Record {
 	return &reqstore.Record{
 		ID: r.ID, ItemType: r.ItemType, ItemID: r.ItemID, TMDBID: r.TMDBID,
 		Title: r.Title, Year: r.Year, Poster: r.Poster, Status: r.Status,
-		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		RequestedBy: r.RequestedBy, ApprovedBy: r.ApprovedBy, ApprovedAt: r.ApprovedAt,
+		TenantID: r.TenantID, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
 }
 
@@ -434,7 +470,8 @@ func fromStoreRecord(r *reqstore.Record) *requestRecord {
 	return &requestRecord{
 		ID: r.ID, ItemType: r.ItemType, ItemID: r.ItemID, TMDBID: r.TMDBID,
 		Title: r.Title, Year: r.Year, Poster: r.Poster, Status: r.Status,
-		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		RequestedBy: r.RequestedBy, ApprovedBy: r.ApprovedBy, ApprovedAt: r.ApprovedAt,
+		TenantID: r.TenantID, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
 }
 
@@ -588,19 +625,31 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		TMDBID    int32  `json:"tmdbId"`
-		Title     string `json:"title"`
-		Year      int32  `json:"year"`
-		Overview  string `json:"overview"`
-		Poster    string `json:"poster"`
-		MediaType string `json:"mediaType"`
-		ItemType  string `json:"itemType"`
-		Type      string `json:"type"`
+		TMDBID      int32  `json:"tmdbId"`
+		Title       string `json:"title"`
+		Year        int32  `json:"year"`
+		Overview    string `json:"overview"`
+		Poster      string `json:"poster"`
+		MediaType   string `json:"mediaType"`
+		ItemType    string `json:"itemType"`
+		Type        string `json:"type"`
+		RequestedBy string `json:"requestedBy"`
+		IsAdmin     bool   `json:"isAdmin"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
+	if req.RequestedBy == "" {
+		req.RequestedBy = strings.TrimSpace(r.Header.Get("X-MuxCore-User"))
+	}
+	if !req.IsAdmin {
+		roles := strings.ToLower(r.Header.Get("X-MuxCore-Roles"))
+		req.IsAdmin = strings.Contains(roles, "admin")
+	}
+	tenantID := m.resolveTenant(r.Context(), r.Header)
+	ctx := tenant.WithID(r.Context(), tenantID)
+	ctx = withRequestPoster(ctx, req.Poster)
 
 	kind := req.MediaType
 	if kind == "" {
@@ -610,25 +659,15 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 		kind = req.Type
 	}
 	if isTVRequest(kind) {
-		gResp, err := m.RequestTV(r.Context(), &requestmedia.RequestTVRequest{
-			TmdbId:   req.TMDBID,
-			Title:    req.Title,
-			Year:     req.Year,
-			Overview: req.Overview,
+		gResp, err := m.RequestTV(ctx, &requestmedia.RequestTVRequest{
+			TmdbId: req.TMDBID, Title: req.Title, Year: req.Year, Overview: req.Overview,
+			RequestedBy: req.RequestedBy, IsAdmin: req.IsAdmin,
 		})
 		if err != nil {
 			slog.Error("request tv", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		m.mu.Lock()
-		if rec, ok := m.requests[gResp.GetRequestId()]; ok {
-			rec.Poster = req.Poster
-			if m.store != nil {
-				_ = m.store.Put(toStoreRecord(rec))
-			}
-		}
-		m.mu.Unlock()
 		json.NewEncoder(w).Encode(map[string]string{
 			"requestId": gResp.GetRequestId(),
 			"seriesId":  gResp.GetSeriesId(),
@@ -639,26 +678,15 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gResp, err := m.RequestMovie(r.Context(), &requestmedia.RequestMovieRequest{
-		TmdbId:   req.TMDBID,
-		Title:    req.Title,
-		Year:     req.Year,
-		Overview: req.Overview,
+	gResp, err := m.RequestMovie(ctx, &requestmedia.RequestMovieRequest{
+		TmdbId: req.TMDBID, Title: req.Title, Year: req.Year, Overview: req.Overview,
+		RequestedBy: req.RequestedBy, IsAdmin: req.IsAdmin,
 	})
 	if err != nil {
 		slog.Error("request movie", "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	m.mu.Lock()
-	if rec, ok := m.requests[gResp.GetRequestId()]; ok {
-		rec.Poster = req.Poster
-		if m.store != nil {
-			_ = m.store.Put(toStoreRecord(rec))
-		}
-	}
-	m.mu.Unlock()
 
 	json.NewEncoder(w).Encode(map[string]string{
 		"requestId": gResp.GetRequestId(),
@@ -674,20 +702,132 @@ func (m *Module) handleRequests(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	refreshCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	m.refreshAcquisitionStatus(refreshCtx)
-	cancel()
-	m.mu.RLock()
-	list := make([]*requestRecord, 0, len(m.requests))
-	for _, rec := range m.requests {
+	statusFilter := r.URL.Query().Get("status")
+	resp, err := m.ListRequests(r.Context(), &requestmedia.ListRequestsRequest{Status: statusFilter})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	list := make([]*requestRecord, 0, len(resp.GetRequests()))
+	for _, info := range resp.GetRequests() {
+		rec := &requestRecord{
+			ID: info.GetRequestId(), ItemType: info.GetItemType(), ItemID: info.GetItemId(),
+			TMDBID: info.GetTmdbId(), Title: info.GetTitle(), Year: info.GetYear(),
+			Status: info.GetStatus(), RequestedBy: info.GetRequestedBy(), ApprovedBy: info.GetApprovedBy(),
+			Poster: info.GetPoster(),
+		}
+		if info.GetCreatedAt() != "" {
+			rec.CreatedAt, _ = time.Parse(time.RFC3339, info.GetCreatedAt())
+		}
+		if info.GetUpdatedAt() != "" {
+			rec.UpdatedAt, _ = time.Parse(time.RFC3339, info.GetUpdatedAt())
+		}
+		if info.GetApprovedAt() != "" {
+			rec.ApprovedAt, _ = time.Parse(time.RFC3339, info.GetApprovedAt())
+		}
 		list = append(list, rec)
 	}
-	m.mu.RUnlock()
-	list = uniqueRequestList(list)
-	sort.Slice(list, func(i, j int) bool {
-		return list[i].CreatedAt.After(list[j].CreatedAt)
-	})
 	json.NewEncoder(w).Encode(list)
+}
+
+func (m *Module) handleRequestAction(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/requests/")
+	path = strings.Trim(path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 || parts[0] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	id, action := parts[0], strings.ToLower(parts[1])
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		By string `json:"by"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if body.By == "" {
+		body.By = strings.TrimSpace(r.Header.Get("X-MuxCore-User"))
+	}
+
+	roles := splitRoles(r.Header.Get("X-MuxCore-Roles"))
+	claimTenant := strings.TrimSpace(r.Header.Get("X-Auth-Claims-Tenant"))
+	headerTenant := strings.TrimSpace(r.Header.Get("X-Tenant-ID"))
+	if claimTenant != "" && headerTenant != "" {
+		if err := tenant.GuardCrossTenant(claimTenant, headerTenant, roles); err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+	}
+
+	m.mu.RLock()
+	rec := m.requests[id]
+	m.mu.RUnlock()
+	if rec != nil && tenant.Enabled() {
+		actorTenant := m.resolveTenant(r.Context(), r.Header)
+		if err := tenant.GuardCrossTenant(actorTenant, rec.TenantID, roles); err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+	}
+
+	switch action {
+	case "approve":
+		ctx := r.Context()
+		if rec != nil && tenant.HasAdminRole(roles) && tenant.Enabled() {
+			ctx = tenant.WithID(ctx, rec.TenantID)
+		}
+		resp, err := m.ApproveRequest(ctx, &requestmedia.ApproveRequestRequest{
+			RequestId: id, ApprovedBy: body.By,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if resp.GetError() != "" {
+			http.Error(w, resp.GetError(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	case "deny":
+		ctx := r.Context()
+		if rec != nil && tenant.HasAdminRole(roles) && tenant.Enabled() {
+			ctx = tenant.WithID(ctx, rec.TenantID)
+		}
+		resp, err := m.DenyRequest(ctx, &requestmedia.DenyRequestRequest{
+			RequestId: id, DeniedBy: body.By,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if resp.GetError() != "" {
+			http.Error(w, resp.GetError(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func splitRoles(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func (m *Module) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -709,54 +849,65 @@ const indexHTML = `<!DOCTYPE html>
 <title>Request Media</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#111;color:#eee;min-height:100vh}
-header{background:#1a1a2e;padding:16px 24px;display:flex;align-items:center;gap:16px;border-bottom:2px solid #e66001}
-header h1{font-size:20px;color:#e66001}
+body{font-family:"Inter","IBM Plex Sans","Segoe UI",system-ui,sans-serif;color:#f5f5f7;min-height:100vh;
+background:
+  radial-gradient(1200px 600px at 8% -10%, rgba(61,184,168,.12) 0%, transparent 55%),
+  radial-gradient(900px 500px at 100% 0%, rgba(245,166,35,.08) 0%, transparent 50%),
+  #0b0c0f;
+}
+header{background:rgba(11,12,15,.85);backdrop-filter:blur(12px);padding:16px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #23252b;position:sticky;top:0;z-index:10}
+header h1{font-size:18px;font-weight:700}
+header h1 .accent{color:#3db8a8}
 .search-bar{flex:1;max-width:600px;display:flex;gap:8px}
-.search-bar input{flex:1;padding:10px 14px;border:1px solid #333;border-radius:6px;background:#222;color:#eee;font-size:14px}
-.search-bar input:focus{outline:none;border-color:#e66001}
-.search-bar button{padding:10px 20px;background:#e66001;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600}
-.search-bar button:disabled{opacity:0.5}
+.search-bar input{flex:1;padding:10px 14px;border:1px solid #23252b;border-radius:10px;background:#1c1e26;color:#f5f5f7;font-size:14px;font:inherit}
+.search-bar input::placeholder{color:#6b6b73}
+.search-bar input:focus{outline:2px solid #3db8a8;outline-offset:1px;border-color:#3db8a8}
+.search-bar button{padding:10px 20px;background:#3db8a8;color:#0b0c0f;border:none;border-radius:10px;cursor:pointer;font-weight:600;font-size:14px;transition:background-color .15s}
+.search-bar button:hover{background:#56d0c0}
+.search-bar button:disabled{opacity:0.5;cursor:not-allowed}
 main{display:flex;gap:24px;padding:24px;max-width:1400px;margin:0 auto}
 .results{flex:1;min-width:0}
 .results-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px}
-.card{background:#1a1a2e;border-radius:8px;overflow:hidden;cursor:pointer;transition:transform .15s,border-color .15s;border:2px solid transparent}
-.card:hover{transform:translateY(-2px);border-color:#e66001}
-.card.selected{border-color:#e66001;box-shadow:0 0 12px rgba(230,96,1,0.3)}
-.card-poster{width:100%;aspect-ratio:2/3;background:#222;display:flex;align-items:center;justify-content:center;color:#555;font-size:12px;overflow:hidden}
+.card{background:#15161b;border-radius:10px;overflow:hidden;cursor:pointer;transition:transform .15s,border-color .15s,box-shadow .15s;border:2px solid transparent}
+.card:hover{transform:translateY(-2px);border-color:#3db8a8;box-shadow:0 8px 20px -4px rgba(0,0,0,.5)}
+.card.selected{border-color:#3db8a8;box-shadow:0 0 12px rgba(61,184,168,0.35)}
+.card-poster{width:100%;aspect-ratio:2/3;background:#1c1e26;display:flex;align-items:center;justify-content:center;color:#6b6b73;font-size:12px;overflow:hidden}
 .card-poster img{width:100%;height:100%;object-fit:cover}
 .card-info{padding:10px}
-.card-info h3{font-size:13px;margin-bottom:4px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.card-info .year{font-size:11px;color:#888}
-.card-info .rating{font-size:11px;color:#e66001;margin-top:2px}
-.detail-panel{width:380px;flex-shrink:0;background:#1a1a2e;border-radius:8px;padding:20px;position:sticky;top:24px;align-self:start;display:none}
+.card-info h3{font-size:13px;margin-bottom:4px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-weight:500}
+.card-info .year{font-size:11px;color:#a1a1aa}
+.card-info .rating{font-size:11px;color:#f5a623;margin-top:2px}
+.detail-panel{width:380px;flex-shrink:0;background:#15161b;border:1px solid #23252b;border-radius:16px;padding:20px;position:sticky;top:88px;align-self:start;display:none}
 .detail-panel.visible{display:block}
-.detail-poster{width:100%;aspect-ratio:2/3;background:#222;border-radius:6px;overflow:hidden;margin-bottom:12px}
+.detail-poster{width:100%;aspect-ratio:2/3;background:#1c1e26;border-radius:10px;overflow:hidden;margin-bottom:12px}
 .detail-poster img{width:100%;height:100%;object-fit:cover}
-.detail-panel h2{font-size:18px;margin-bottom:4px}
-.detail-panel .meta{color:#888;font-size:13px;margin-bottom:8px}
-.detail-panel .overview{font-size:13px;color:#bbb;line-height:1.5;margin-bottom:16px;max-height:120px;overflow-y:auto}
-.detail-panel .rating{color:#e66001;font-size:14px;margin-bottom:12px}
-.request-btn{width:100%;padding:12px;background:#e66001;color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:600;cursor:pointer}
+.detail-panel h2{font-size:18px;margin-bottom:4px;font-weight:700}
+.detail-panel .meta{color:#a1a1aa;font-size:13px;margin-bottom:8px}
+.detail-panel .overview{font-size:13px;color:#c7c8cc;line-height:1.5;margin-bottom:16px;max-height:120px;overflow-y:auto}
+.detail-panel .rating{color:#f5a623;font-size:14px;margin-bottom:12px}
+.request-btn{width:100%;padding:12px;background:#3db8a8;color:#0b0c0f;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;transition:background-color .15s}
+.request-btn:hover{background:#56d0c0}
 .request-btn:disabled{opacity:0.5;cursor:not-allowed}
-.request-btn.requested{background:#2a6e2a}
-.status-msg{margin-top:8px;font-size:13px;color:#888;text-align:center}
-.history-section{margin-top:24px;padding-top:16px;border-top:1px solid #333}
-.history-section h3{font-size:14px;color:#888;margin-bottom:8px}
+.request-btn.requested{background:#3ddc84}
+.status-msg{margin-top:8px;font-size:13px;color:#a1a1aa;text-align:center}
+.history-section{margin-top:24px;padding-top:16px;border-top:1px solid #23252b}
+.history-section h3{font-size:14px;color:#a1a1aa;margin-bottom:8px;font-weight:600}
 .history-item{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px}
-.history-item .status{font-size:11px;padding:2px 6px;border-radius:4px}
-.history-item .status.added{background:#1a4a1a;color:#4caf50}
-.history-item .status.requested{background:#4a3a1a;color:#ff9800}
-.history-item .status.searching{background:#3a3a1a;color:#ffd54f}
-.history-item .status.queued{background:#3a3a1a;color:#ffd54f}
-.history-item .status.downloading{background:#1a3a4a;color:#4fc3f7}
-.history-item .status.available{background:#1a4a3a;color:#69f0ae}
+.history-item .status{font-size:11px;padding:2px 6px;border-radius:6px;font-weight:500}
+.history-item .status.added{background:rgba(61,220,132,.15);color:#3ddc84}
+.history-item .status.requested{background:rgba(245,166,35,.15);color:#f5a623}
+.history-item .status.searching{background:rgba(245,166,35,.15);color:#f5a623}
+.history-item .status.queued{background:rgba(245,166,35,.15);color:#f5a623}
+.history-item .status.downloading{background:rgba(61,184,168,.15);color:#56d0c0}
+.history-item .status.available{background:rgba(61,220,132,.15);color:#3ddc84}
+a{color:#3db8a8}
+:focus-visible{outline:2px solid #3db8a8;outline-offset:2px}
 @media(max-width:900px){main{flex-direction:column}.detail-panel{width:100%;position:static}}
 </style>
 </head>
 <body>
 <header>
-<h1>Request Media</h1>
+<h1>MuxCore <span class="accent">Request</span></h1>
 <div class="search-bar">
 <input id="searchInput" type="text" placeholder="Search for a movie..." autofocus>
 <button id="searchBtn" onclick="search()">Search</button>
@@ -812,15 +963,15 @@ const panel = document.getElementById('detailPanel');
 panel.classList.add('visible');
 document.getElementById('detailTitle').textContent = 'Search unavailable: ' + error;
 document.getElementById('detailMeta').textContent = 'Enter TMDB ID manually to request';
-document.getElementById('detailPoster').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#555">Manual Entry</div>';
+document.getElementById('detailPoster').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#6b6b73">Manual Entry</div>';
 document.getElementById('detailRating').textContent = '';
 document.getElementById('detailOverview').innerHTML =
-'<div style="margin-bottom:12px"><label style="font-size:13px;color:#888">TMDB ID</label>' +
-'<input id="manualTmdbId" type="number" style="width:100%;padding:8px;border:1px solid #333;border-radius:4px;background:#222;color:#eee;font-size:14px;margin-top:4px" placeholder="e.g. 218 for The Terminator"></div>' +
-'<div style="margin-bottom:12px"><label style="font-size:13px;color:#888">Title</label>' +
-'<input id="manualTitle" type="text" style="width:100%;padding:8px;border:1px solid #333;border-radius:4px;background:#222;color:#eee;font-size:14px;margin-top:4px" value="' + esc(query) + '"></div>' +
-'<div style="margin-bottom:12px"><label style="font-size:13px;color:#888">Year</label>' +
-'<input id="manualYear" type="number" style="width:100%;padding:8px;border:1px solid #333;border-radius:4px;background:#222;color:#eee;font-size:14px;margin-top:4px" placeholder="e.g. 1984"></div>';
+'<div style="margin-bottom:12px"><label style="font-size:13px;color:#a1a1aa">TMDB ID</label>' +
+'<input id="manualTmdbId" type="number" style="width:100%;padding:8px;border:1px solid #23252b;border-radius:8px;background:#1c1e26;color:#f5f5f7;font-size:14px;margin-top:4px;font:inherit" placeholder="e.g. 218 for The Terminator"></div>' +
+'<div style="margin-bottom:12px"><label style="font-size:13px;color:#a1a1aa">Title</label>' +
+'<input id="manualTitle" type="text" style="width:100%;padding:8px;border:1px solid #23252b;border-radius:8px;background:#1c1e26;color:#f5f5f7;font-size:14px;margin-top:4px;font:inherit" value="' + esc(query) + '"></div>' +
+'<div style="margin-bottom:12px"><label style="font-size:13px;color:#a1a1aa">Year</label>' +
+'<input id="manualYear" type="number" style="width:100%;padding:8px;border:1px solid #23252b;border-radius:8px;background:#1c1e26;color:#f5f5f7;font-size:14px;margin-top:4px;font:inherit" placeholder="e.g. 1984"></div>';
 document.getElementById('requestBtn').textContent = 'Request Movie';
 document.getElementById('requestBtn').className = 'request-btn';
 document.getElementById('requestBtn').disabled = false;
@@ -843,7 +994,7 @@ document.getElementById('requestBtn').onclick = requestMovie;
 function renderResults(results) {
 const grid = document.getElementById('resultsGrid');
 if (results.length === 0) {
-grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#555;padding:40px;font-size:14px">No results found. Try a different search.</div>';
+grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#6b6b73;padding:40px;font-size:14px">No results found. Try a different search.</div>';
 return;
 }
 grid.innerHTML = results.map(r => {
@@ -880,7 +1031,7 @@ document.getElementById('detailRating').textContent = '★ ' + (movie.voteAvg ? 
 document.getElementById('detailOverview').textContent = movie.overview || 'No overview available.';
 const posterEl = document.getElementById('detailPoster');
 if (movie.poster) { posterEl.innerHTML = '<img src="https://image.tmdb.org/t/p/w342' + movie.poster + '">'; }
-else { posterEl.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#555">No Poster</div>'; }
+else { posterEl.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#6b6b73">No Poster</div>'; }
 loadHistory();
 });
 }
@@ -964,190 +1115,75 @@ func (m *Module) tryRunWorkflow(ctx context.Context, definitionID string, input 
 }
 
 func (m *Module) RequestMovie(ctx context.Context, req *requestmedia.RequestMovieRequest) (*requestmedia.RequestMovieResponse, error) {
-	if existing := m.findExisting("movie", req.GetTmdbId(), req.GetTitle(), req.GetYear()); existing != nil {
-		slog.Info("movie already requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId(), "request_id", existing.ID)
+	tenantID := m.resolveTenant(ctx, nil)
+	if existing := m.findExisting("movie", req.GetTmdbId(), req.GetTitle(), req.GetYear(), tenantID); existing != nil {
+		slog.Info("movie already requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId(), "request_id", existing.ID, "tenant", tenantID)
 		return &requestmedia.RequestMovieResponse{
 			RequestId: existing.ID, MovieId: existing.ItemID, Status: existing.Status,
 		}, nil
 	}
 	requestID := fmt.Sprintf("req_mv_%d", time.Now().UnixNano())
+	requestedBy := strings.TrimSpace(req.GetRequestedBy())
+	posterPath := requestPosterFromContext(ctx)
 
-	if m.getPreferWorkflow() {
-		if runID, ok := m.tryRunWorkflow(ctx, "movie-request", map[string]string{
-			"title":      req.GetTitle(),
-			"year":       fmt.Sprintf("%d", req.GetYear()),
-			"tmdb_id":    fmt.Sprintf("%d", req.GetTmdbId()),
-			"request_id": requestID,
-		}); ok {
-			m.saveRequest(&requestRecord{
-				ID: requestID, ItemType: "movie", Title: req.GetTitle(),
-				Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "workflow",
-			})
-			go m.publish(context.Background(), "media.movie.requested", map[string]interface{}{
-				"request_id": requestID, "tmdb_id": req.GetTmdbId(),
-				"title": req.GetTitle(), "year": req.GetYear(), "run_id": runID,
-			})
-			m.tryQueueForAcquisition(ctx, queueParams{
-				ItemType: "movie", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
-				TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
-			})
-			return &requestmedia.RequestMovieResponse{
-				RequestId: requestID, MovieId: "", Status: "workflow",
-			}, nil
-		}
-	}
-
-	addr, err := m.findModuleAddrPrefer(ctx, "media.library.movie", "media.library.movies", "media.library")
-	if err != nil {
-		go m.publish(context.Background(), "media.movie.requested", map[string]interface{}{
-			"request_id": requestID, "tmdb_id": req.GetTmdbId(),
-			"title": req.GetTitle(), "year": req.GetYear(),
-		})
+	if m.needsApproval(requestedBy, req.GetIsAdmin()) {
 		m.saveRequest(&requestRecord{
 			ID: requestID, ItemType: "movie", Title: req.GetTitle(),
-			Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "requested",
+			Year: req.GetYear(), TMDBID: req.GetTmdbId(), Overview: req.GetOverview(),
+			Poster: posterPath, Status: "pending",
+			RequestedBy: requestedBy, TenantID: tenantID,
 		})
-		m.tryQueueForAcquisition(ctx, queueParams{
-			ItemType: "movie", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
-			TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
-		})
-		return &requestmedia.RequestMovieResponse{
-			RequestId: requestID, MovieId: "", Status: "requested",
-		}, nil
+		slog.Info("movie request pending approval", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId(), "by", requestedBy, "tenant", tenantID)
+		return &requestmedia.RequestMovieResponse{RequestId: requestID, Status: "pending"}, nil
 	}
 
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, fmt.Errorf("dial media-movies: %w", err)
-	}
-	defer conn.Close()
-
-	moviesClient := mgmntv1.NewMovieManagementServiceClient(conn)
-	addResp, err := moviesClient.AddMovie(ctx, &mgmntv1.AddMovieRequest{
-		TmdbId:   req.GetTmdbId(),
-		Title:    req.GetTitle(),
-		Year:     req.GetYear(),
-		Overview: req.GetOverview(),
-		Genres:   req.GetGenres(),
+	movieID, status, err := m.fulfillRequest(ctx, fulfillParams{
+		RequestID: requestID, ItemType: "movie", TMDBID: req.GetTmdbId(),
+		Title: req.GetTitle(), Year: req.GetYear(), Overview: req.GetOverview(),
+		Genres: req.GetGenres(), Poster: posterPath, RequestedBy: requestedBy, TenantID: tenantID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("add movie: %w", err)
+		return nil, err
 	}
-
-	movieID := addResp.GetMovieId()
-	m.saveRequest(&requestRecord{
-		ID: requestID, ItemType: "movie", ItemID: movieID, TMDBID: req.GetTmdbId(),
-		Title: req.GetTitle(), Year: req.GetYear(), Status: "added",
-	})
-
-	go m.publish(context.Background(), "media.movie.requested", map[string]interface{}{
-		"request_id": requestID, "movie_id": movieID,
-		"tmdb_id": req.GetTmdbId(), "title": req.GetTitle(), "year": req.GetYear(),
-	})
-
-	m.tryQueueForAcquisition(ctx, queueParams{
-		ItemType: "movie", ItemID: movieID,
-		TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
-	})
-
-	slog.Info("movie requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId(), "movie_id", movieID)
 	return &requestmedia.RequestMovieResponse{
-		RequestId: requestID, MovieId: movieID, Status: "added",
+		RequestId: requestID, MovieId: movieID, Status: status,
 	}, nil
 }
 
 func (m *Module) RequestTV(ctx context.Context, req *requestmedia.RequestTVRequest) (*requestmedia.RequestTVResponse, error) {
-	if existing := m.findExisting("tv", req.GetTmdbId(), req.GetTitle(), req.GetYear()); existing != nil {
-		slog.Info("tv already requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId(), "request_id", existing.ID)
+	tenantID := m.resolveTenant(ctx, nil)
+	if existing := m.findExisting("tv", req.GetTmdbId(), req.GetTitle(), req.GetYear(), tenantID); existing != nil {
+		slog.Info("tv already requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId(), "request_id", existing.ID, "tenant", tenantID)
 		return &requestmedia.RequestTVResponse{
 			RequestId: existing.ID, SeriesId: existing.ItemID, Status: existing.Status,
 		}, nil
 	}
 	requestID := fmt.Sprintf("req_tv_%d", time.Now().UnixNano())
-	if m.getPreferWorkflow() {
-		if runID, ok := m.tryRunWorkflow(ctx, "tv-request", map[string]string{
-			"title":          req.GetTitle(),
-			"year":           fmt.Sprintf("%d", req.GetYear()),
-			"tmdb_id":        fmt.Sprintf("%d", req.GetTmdbId()),
-			"season_number":  fmt.Sprintf("%d", req.GetSeasonNumber()),
-			"episode_number": fmt.Sprintf("%d", req.GetEpisodeNumber()),
-			"request_id":     requestID,
-		}); ok {
-			m.saveRequest(&requestRecord{
-				ID: requestID, ItemType: "tv", Title: req.GetTitle(),
-				Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "workflow",
-			})
-			go m.publish(context.Background(), "media.tv.requested", map[string]interface{}{
-				"request_id": requestID, "tmdb_id": req.GetTmdbId(),
-				"title": req.GetTitle(), "year": req.GetYear(), "run_id": runID,
-				"season_number": req.GetSeasonNumber(), "episode_number": req.GetEpisodeNumber(),
-			})
-			m.tryQueueForAcquisition(ctx, queueParams{
-				ItemType: "tv", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
-				TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
-				SeasonNumber: req.GetSeasonNumber(), EpisodeNumber: req.GetEpisodeNumber(),
-			})
-			return &requestmedia.RequestTVResponse{RequestId: requestID, Status: "workflow"}, nil
-		}
-	}
+	requestedBy := strings.TrimSpace(req.GetRequestedBy())
+	posterPath := requestPosterFromContext(ctx)
 
-	addr, err := m.findModuleAddr(ctx, "media.library.tv")
-	if err != nil {
+	if m.needsApproval(requestedBy, req.GetIsAdmin()) {
 		m.saveRequest(&requestRecord{
 			ID: requestID, ItemType: "tv", Title: req.GetTitle(),
-			Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "requested",
+			Year: req.GetYear(), TMDBID: req.GetTmdbId(), Overview: req.GetOverview(),
+			Poster: posterPath, Status: "pending",
+			RequestedBy: requestedBy, TenantID: tenantID,
 		})
-		go m.publish(context.Background(), "media.tv.requested", map[string]interface{}{
-			"request_id": requestID, "tmdb_id": req.GetTmdbId(),
-			"title": req.GetTitle(), "year": req.GetYear(),
-			"season_number": req.GetSeasonNumber(), "episode_number": req.GetEpisodeNumber(),
-		})
-		m.tryQueueForAcquisition(ctx, queueParams{
-			ItemType: "tv", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
-			TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
-			SeasonNumber: req.GetSeasonNumber(), EpisodeNumber: req.GetEpisodeNumber(),
-		})
-		slog.Info("tv requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId())
-		return &requestmedia.RequestTVResponse{
-			RequestId: requestID, Status: "requested",
-		}, nil
+		slog.Info("tv request pending approval", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId(), "by", requestedBy, "tenant", tenantID)
+		return &requestmedia.RequestTVResponse{RequestId: requestID, Status: "pending"}, nil
 	}
 
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, fmt.Errorf("dial media-tvshows: %w", err)
-	}
-	defer conn.Close()
-
-	tvClient := tvmgmtv1.NewTvManagementServiceClient(conn)
-	addResp, err := tvClient.AddTVShow(ctx, &tvmgmtv1.AddTVShowRequest{
-		TmdbId:   req.GetTmdbId(),
-		Name:     req.GetTitle(),
-		Year:     req.GetYear(),
-		Overview: req.GetOverview(),
+	seriesID, status, err := m.fulfillRequest(ctx, fulfillParams{
+		RequestID: requestID, ItemType: "tv", TMDBID: req.GetTmdbId(),
+		Title: req.GetTitle(), Year: req.GetYear(), Overview: req.GetOverview(),
+		Poster: posterPath, SeasonNumber: req.GetSeasonNumber(), EpisodeNumber: req.GetEpisodeNumber(),
+		RequestedBy: requestedBy, TenantID: tenantID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("add tv show: %w", err)
+		return nil, err
 	}
-
-	seriesID := addResp.GetSeriesId()
-	m.saveRequest(&requestRecord{
-		ID: requestID, ItemType: "tv", ItemID: seriesID, TMDBID: req.GetTmdbId(),
-		Title: req.GetTitle(), Year: req.GetYear(), Status: "added",
-	})
-	go m.publish(context.Background(), "media.tv.requested", map[string]interface{}{
-		"request_id": requestID, "series_id": seriesID, "tmdb_id": req.GetTmdbId(),
-		"title": req.GetTitle(), "year": req.GetYear(),
-		"season_number": req.GetSeasonNumber(), "episode_number": req.GetEpisodeNumber(),
-	})
-	m.tryQueueForAcquisition(ctx, queueParams{
-		ItemType: "tv", ItemID: seriesID,
-		TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
-		SeasonNumber: req.GetSeasonNumber(), EpisodeNumber: req.GetEpisodeNumber(),
-	})
-	slog.Info("tv requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId(), "series_id", seriesID)
 	return &requestmedia.RequestTVResponse{
-		RequestId: requestID, SeriesId: seriesID, Status: "added",
+		RequestId: requestID, SeriesId: seriesID, Status: status,
 	}, nil
 }
 
@@ -1161,11 +1197,22 @@ func (m *Module) GetStatus(ctx context.Context, req *requestmedia.GetStatusReque
 	if !ok {
 		return nil, fmt.Errorf("request not found: %s", req.GetRequestId())
 	}
-	return &requestmedia.GetStatusResponse{
+	if tenant.Enabled() {
+		want := m.resolveTenant(ctx, nil)
+		if rec.TenantID != "" && rec.TenantID != want {
+			return nil, fmt.Errorf("request not found: %s", req.GetRequestId())
+		}
+	}
+	resp := &requestmedia.GetStatusResponse{
 		RequestId: rec.ID, ItemType: rec.ItemType, ItemId: rec.ItemID,
 		Title: rec.Title, Year: rec.Year, Status: rec.Status,
 		CreatedAt: rec.CreatedAt.Format(time.RFC3339), UpdatedAt: rec.UpdatedAt.Format(time.RFC3339),
-	}, nil
+		RequestedBy: rec.RequestedBy, ApprovedBy: rec.ApprovedBy,
+	}
+	if !rec.ApprovedAt.IsZero() {
+		resp.ApprovedAt = rec.ApprovedAt.Format(time.RFC3339)
+	}
+	return resp, nil
 }
 
 var _ contracts.Module = (*Module)(nil)

@@ -136,6 +136,10 @@ func (m *Module) refreshAcquisitionStatus(ctx context.Context) {
 		if rec == nil {
 			continue
 		}
+		switch rec.Status {
+		case "pending", "denied":
+			continue
+		}
 		next := deriveAcquisitionStatus(rec.ItemType, rec.TMDBID, rec.Title, queue, hist)
 		if next == "" || statusRank(next) <= statusRank(rec.Status) {
 			continue

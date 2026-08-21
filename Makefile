@@ -16,7 +16,7 @@ clean:
 	rm -f $(BINARY)
 
 proto:
-	protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative -I proto proto/requestmedia/requestmedia.proto
+	protoc --go_out=proto --go_opt=paths=source_relative --go-grpc_out=proto --go-grpc_opt=paths=source_relative -I proto proto/requestmedia/requestmedia.proto
 
 tidy:
 	$(GO) mod tidy

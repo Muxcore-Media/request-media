@@ -8,8 +8,8 @@ func TestSettingsPreferWorkflow(t *testing.T) {
 		t.Fatal("default prefer_workflow should be true")
 	}
 	defs := m.Settings()
-	if len(defs) != 1 || defs[0].Key != "prefer_workflow" {
-		t.Fatalf("defs=%+v", defs)
+	if len(defs) != 2 {
+		t.Fatalf("defs len=%d want 2", len(defs))
 	}
 	if err := m.UpdateSetting("prefer_workflow", "false"); err != nil {
 		t.Fatal(err)
@@ -22,6 +22,12 @@ func TestSettingsPreferWorkflow(t *testing.T) {
 	}
 	if !m.getPreferWorkflow() {
 		t.Fatal("expected true")
+	}
+	if err := m.UpdateSetting("require_approval", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if !m.getRequireApproval() {
+		t.Fatal("expected require_approval true")
 	}
 	if err := m.UpdateSetting("unknown", "x"); err == nil {
 		t.Fatal("expected error")

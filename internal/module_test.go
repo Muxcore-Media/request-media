@@ -169,12 +169,18 @@ func TestFindModuleAddrPrefer(t *testing.T) {
 
 type stubMovies struct {
 	mgmntv1.UnimplementedMovieManagementServiceServer
-	last *mgmntv1.AddMovieRequest
+	last       *mgmntv1.AddMovieRequest
+	refreshIDs []string
 }
 
 func (s *stubMovies) AddMovie(ctx context.Context, req *mgmntv1.AddMovieRequest) (*mgmntv1.AddMovieResponse, error) {
 	s.last = req
 	return &mgmntv1.AddMovieResponse{MovieId: "movie-1"}, nil
+}
+
+func (s *stubMovies) RefreshMetadata(ctx context.Context, req *mgmntv1.RefreshMetadataRequest) (*mgmntv1.RefreshMetadataResponse, error) {
+	s.refreshIDs = append(s.refreshIDs, req.GetMovieId())
+	return &mgmntv1.RefreshMetadataResponse{}, nil
 }
 
 type stubTV struct {

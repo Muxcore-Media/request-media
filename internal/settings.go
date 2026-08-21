@@ -27,6 +27,15 @@ func (m *Module) settingsDefs() []contracts.SettingDef {
 			Description: "Try workflow.engine (movie-request/tv-request) before library Add* (REQUEST_PREFER_WORKFLOW)",
 			Group:       "Routing",
 		},
+		{
+			Key:         "require_approval",
+			Label:       "Require Approval",
+			Type:        contracts.SettingTypeBool,
+			Value:       strconv.FormatBool(m.getRequireApproval()),
+			Default:     "false",
+			Description: "When true, all new requests start as pending until approved (REQUEST_REQUIRE_APPROVAL). Non-admin requestors always need approval.",
+			Group:       "Approval",
+		},
 	}
 }
 
@@ -40,6 +49,15 @@ func (m *Module) updateSetting(key, value string) error {
 		}
 		m.cfgMu.Lock()
 		m.preferWorkflow = v
+		m.cfgMu.Unlock()
+		return nil
+	case "require_approval", "REQUEST_REQUIRE_APPROVAL":
+		v, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid require_approval %q (true/false)", value)
+		}
+		m.cfgMu.Lock()
+		m.requireApproval = v
 		m.cfgMu.Unlock()
 		return nil
 	default:

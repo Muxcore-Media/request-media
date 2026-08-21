@@ -122,3 +122,25 @@ func TestPruneDuplicateTMDBRows(t *testing.T) {
 		t.Fatalf("movie row must remain, got %+v", all)
 	}
 }
+
+func TestListScopedByTenant(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(filepath.Join(dir, "requests.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Put(&Record{ID: "a", ItemType: "movie", Title: "A", Status: "requested", TenantID: "t1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Put(&Record{ID: "b", ItemType: "movie", Title: "B", Status: "requested", TenantID: "t2"}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.List("t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != "a" {
+		t.Fatalf("list=%+v", list)
+	}
+}

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0] — 2026-08-20
+
+### Added
+- Request approval (`REQUEST_REQUIRE_APPROVAL`, default false): non-admin or gated requests start as `pending` and do not queue automation until approved.
+- Persist `requested_by`, `approved_by`, `approved_at`; statuses `pending` / `denied`.
+- gRPC + HTTP: `ApproveRequest`, `DenyRequest`, `ListRequests` (`POST /api/requests/{id}/approve|deny`).
+
 ## [0.2.12] — 2026-08-18
 
 ### Fixed

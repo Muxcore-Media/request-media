@@ -6,6 +6,9 @@ service RequestService {
   rpc RequestMovie(RequestMovieRequest) returns (RequestMovieResponse);
   rpc RequestTV(RequestTVRequest) returns (RequestTVResponse);
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  rpc ListRequests(ListRequestsRequest) returns (ListRequestsResponse);
+  rpc ApproveRequest(ApproveRequestRequest) returns (ApproveRequestResponse);
+  rpc DenyRequest(DenyRequestRequest) returns (DenyRequestResponse);
 }
 
 message RequestMovieRequest {
@@ -14,6 +17,8 @@ message RequestMovieRequest {
   int32 year = 3;
   string overview = 4;
   repeated string genres = 5;
+  string requested_by = 6;
+  bool is_admin = 7;
 }
 
 message RequestMovieResponse {
@@ -29,6 +34,8 @@ message RequestTVRequest {
   int32 season_number = 4;
   int32 episode_number = 5;
   string overview = 6;
+  string requested_by = 7;
+  bool is_admin = 8;
 }
 
 message RequestTVResponse {
@@ -50,4 +57,54 @@ message GetStatusResponse {
   string status = 6;
   string created_at = 7;
   string updated_at = 8;
+  string requested_by = 9;
+  string approved_by = 10;
+  string approved_at = 11;
+}
+
+message ListRequestsRequest {
+  string status = 1; // optional filter; empty = all
+}
+
+message RequestInfo {
+  string request_id = 1;
+  string item_type = 2;
+  string item_id = 3;
+  int32 tmdb_id = 4;
+  string title = 5;
+  int32 year = 6;
+  string status = 7;
+  string created_at = 8;
+  string updated_at = 9;
+  string requested_by = 10;
+  string approved_by = 11;
+  string approved_at = 12;
+  string poster = 13;
+}
+
+message ListRequestsResponse {
+  repeated RequestInfo requests = 1;
+}
+
+message ApproveRequestRequest {
+  string request_id = 1;
+  string approved_by = 2;
+}
+
+message ApproveRequestResponse {
+  string request_id = 1;
+  string status = 2;
+  string item_id = 3;
+  string error = 4;
+}
+
+message DenyRequestRequest {
+  string request_id = 1;
+  string denied_by = 2;
+}
+
+message DenyRequestResponse {
+  string request_id = 1;
+  string status = 2;
+  string error = 3;
 }
