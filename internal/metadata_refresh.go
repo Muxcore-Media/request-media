@@ -29,7 +29,7 @@ func (m *Module) scheduleMovieMetadataRefresh(movieID string, tmdbID int32) {
 			slog.Warn("request-media: dial media-movies for metadata refresh", "movie_id", movieID, "error", err)
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		client := mgmntv1.NewMovieManagementServiceClient(conn)
 		if _, err := client.RefreshMetadata(ctx, &mgmntv1.RefreshMetadataRequest{MovieId: movieID}); err != nil {
 			slog.Warn("request-media: refresh movie metadata", "movie_id", movieID, "error", err)
@@ -54,7 +54,7 @@ func (m *Module) scheduleTVMetadataRefresh(seriesID string, tmdbID int32) {
 			slog.Warn("request-media: dial media-tvshows for metadata refresh", "series_id", seriesID, "error", err)
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		client := tvmgmtv1.NewTvManagementServiceClient(conn)
 		if _, err := client.RefreshMetadata(ctx, &tvmgmtv1.RefreshMetadataRequest{SeriesId: seriesID}); err != nil {
 			slog.Warn("request-media: refresh tv metadata", "series_id", seriesID, "error", err)

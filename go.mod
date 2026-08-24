@@ -51,3 +51,19 @@ replace github.com/Muxcore-Media/contracts-scanner => ../contracts-scanner
 replace github.com/Muxcore-Media/contracts-automation => ../contracts-automation
 
 replace github.com/Muxcore-Media/contracts-metadata => ../contracts-metadata
+
+replace github.com/Muxcore-Media/core => ../core
+
+replace github.com/Muxcore-Media/core/pkg/contracts => ../core/pkg/contracts
+
+replace github.com/Muxcore-Media/core/pkg/tenant => ../core/pkg/tenant
+
+replace github.com/Muxcore-Media/core/sdk/go/client => ../core/sdk/go/client
+
+replace github.com/Muxcore-Media/core/sdk/go/module => ../core/sdk/go/module
+
+replace github.com/Muxcore-Media/media-movies => ../media-movies
+
+replace github.com/Muxcore-Media/media-tvshows => ../media-tvshows
+
+replace github.com/Muxcore-Media/metadata-tmdb => ../metadata-tmdb

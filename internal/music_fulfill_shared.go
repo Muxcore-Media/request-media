@@ -82,10 +82,7 @@ func (m *Module) refreshMusicArtistMetadata(ctx context.Context, client musicv1.
 	if artistID == "" {
 		return
 	}
-	_, err := client.RefreshMetadata(ctx, &musicv1.RefreshMetadataRequest{ArtistId: artistID})
-	if err != nil {
-		// best-effort for full-artist requests
-	}
+	_, _ = client.RefreshMetadata(ctx, &musicv1.RefreshMetadataRequest{ArtistId: artistID})
 }
 
 func (m *Module) queueMusicAlbum(ctx context.Context, albumID, title string) {

@@ -17,13 +17,13 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	automationv1 "github.com/Muxcore-Media/contracts-automation/muxcore/automation/v1"
+	metadatav1 "github.com/Muxcore-Media/contracts-metadata/muxcore/metadata/v1"
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	"github.com/Muxcore-Media/core/pkg/tenant"
 	workflowv1 "github.com/Muxcore-Media/core/proto/gen/muxcore/workflow/v1"
 	"github.com/Muxcore-Media/core/sdk/go/client"
 	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
-	automationv1 "github.com/Muxcore-Media/contracts-automation/muxcore/automation/v1"
-	metadatav1 "github.com/Muxcore-Media/contracts-metadata/muxcore/metadata/v1"
 	"github.com/Muxcore-Media/request-media/internal/reqstore"
 	requestmedia "github.com/Muxcore-Media/request-media/proto/requestmedia"
 )
@@ -255,10 +255,10 @@ func (m *Module) Stop(ctx context.Context) error {
 		m.grpcSrv.GracefulStop()
 	}
 	if m.mc != nil {
-		m.mc.Close()
+		_ = m.mc.Close()
 	}
 	if m.automationConn != nil {
-		m.automationConn.Close()
+		_ = m.automationConn.Close()
 	}
 	if m.store != nil {
 		_ = m.store.Close()
@@ -637,7 +637,7 @@ func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	ctx, cancel := handlerContext(r)
 	defer cancel()
@@ -718,7 +718,7 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"requestId": gResp.GetRequestId(),
 			"albumId":   gResp.GetAlbumId(),
 			"artistId":  gResp.GetArtistId(),
@@ -740,7 +740,7 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"requestId": gResp.GetRequestId(),
 			"albumId":   gResp.GetAlbumId(),
 			"artistId":  gResp.GetArtistId(),
@@ -760,7 +760,7 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"requestId": gResp.GetRequestId(),
 			"artistId":  gResp.GetArtistId(),
 			"status":    gResp.GetStatus(),
@@ -779,7 +779,7 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"requestId": gResp.GetRequestId(),
 			"seriesId":  gResp.GetSeriesId(),
 			"status":    gResp.GetStatus(),
@@ -799,7 +799,7 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"requestId": gResp.GetRequestId(),
 		"movieId":   gResp.GetMovieId(),
 		"status":    gResp.GetStatus(),
@@ -852,7 +852,7 @@ func (m *Module) handleRequests(w http.ResponseWriter, r *http.Request) {
 		}
 		list = append(list, rec)
 	}
-	json.NewEncoder(w).Encode(list)
+	_ = json.NewEncoder(w).Encode(list)
 }
 
 func (m *Module) handleRequestAction(w http.ResponseWriter, r *http.Request) {
@@ -969,7 +969,7 @@ func (m *Module) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	indexTmpl.Execute(w, nil)
+	_ = indexTmpl.Execute(w, nil)
 }
 
 var indexTmpl = template.Must(template.New("index").Parse(indexHTML))
@@ -1219,7 +1219,7 @@ loadHistory();
 func extractYear(date string) int32 {
 	if len(date) >= 4 {
 		var y int32
-		fmt.Sscanf(date[:4], "%d", &y)
+		_, _ = fmt.Sscanf(date[:4], "%d", &y)
 		return y
 	}
 	return 0
@@ -1234,7 +1234,7 @@ func (m *Module) tryRunWorkflow(ctx context.Context, definitionID string, input 
 	if err != nil {
 		return "", false
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	wf := workflowv1.NewWorkflowServiceClient(conn)
 	resp, err := wf.Run(ctx, &workflowv1.RunRequest{
 		DefinitionId: definitionID,

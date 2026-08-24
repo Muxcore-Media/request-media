@@ -15,9 +15,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	metadatav1 "github.com/Muxcore-Media/contracts-metadata/muxcore/metadata/v1"
 	mgmntv1 "github.com/Muxcore-Media/media-movies/proto/mgmntv1"
 	tvmgmtv1 "github.com/Muxcore-Media/media-tvshows/proto/tvmgmtv1"
-	metadatav1 "github.com/Muxcore-Media/contracts-metadata/muxcore/metadata/v1"
 	requestmedia "github.com/Muxcore-Media/request-media/proto/requestmedia"
 )
 
@@ -81,6 +81,27 @@ func testHTTPClient() *http.Client {
 	return &http.Client{Timeout: 15 * time.Second}
 }
 
+func postFixtureRequest(client *http.Client, url, body string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-MuxCore-Roles", "admin")
+	req.Header.Set("X-MuxCore-User", "fixture-test")
+	return client.Do(req)
+}
+
+func getFixtureRequest(client *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-MuxCore-Roles", "admin")
+	req.Header.Set("X-MuxCore-User", "fixture-test")
+	return client.Do(req)
+}
+
 func testModuleHTTP(t *testing.T) (*Module, string, *http.Client) {
 	t.Helper()
 	m := testModule(t)
@@ -130,7 +151,7 @@ func TestAdminHTTP_FixtureMetadata_MovieAndTVFlows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /: %v", err)
 	}
-	defer idxResp.Body.Close()
+	defer func() { _ = idxResp.Body.Close() }()
 	idxBody, _ := io.ReadAll(idxResp.Body)
 	if idxResp.StatusCode != http.StatusOK || !bytes.Contains(idxBody, []byte("Request Media")) {
 		t.Fatalf("admin index: status=%d body=%q", idxResp.StatusCode, truncateBytes(idxBody, 200))
@@ -144,7 +165,7 @@ func TestAdminHTTP_FixtureMetadata_MovieAndTVFlows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search movie: %v", err)
 	}
-	defer searchMovie.Body.Close()
+	defer func() { _ = searchMovie.Body.Close() }()
 	var movieSearch struct {
 		Results []searchResult `json:"results"`
 		Error   string         `json:"error"`
@@ -160,11 +181,11 @@ func TestAdminHTTP_FixtureMetadata_MovieAndTVFlows(t *testing.T) {
 	}
 
 	reqMovieBody := `{"tmdbId":550,"title":"Fight Club","year":1999,"overview":"soap","poster":"/p.jpg","type":"movie"}`
-	reqMovie, err := client.Post(base+"/api/request", "application/json", strings.NewReader(reqMovieBody))
+	reqMovie, err := postFixtureRequest(client, base+"/api/request", reqMovieBody)
 	if err != nil {
 		t.Fatalf("POST movie: %v", err)
 	}
-	defer reqMovie.Body.Close()
+	defer func() { _ = reqMovie.Body.Close() }()
 	var movieOut map[string]string
 	if err := json.NewDecoder(reqMovie.Body).Decode(&movieOut); err != nil {
 		t.Fatalf("decode movie request: %v", err)
@@ -181,7 +202,7 @@ func TestAdminHTTP_FixtureMetadata_MovieAndTVFlows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search tv: %v", err)
 	}
-	defer searchTV.Body.Close()
+	defer func() { _ = searchTV.Body.Close() }()
 	var tvSearch struct {
 		Results []searchResult `json:"results"`
 		Error   string         `json:"error"`
@@ -197,11 +218,11 @@ func TestAdminHTTP_FixtureMetadata_MovieAndTVFlows(t *testing.T) {
 	}
 
 	reqTVBody := `{"tmdbId":1396,"title":"Breaking Bad","year":2008,"overview":"chem","type":"tv"}`
-	reqTV, err := client.Post(base+"/api/request", "application/json", strings.NewReader(reqTVBody))
+	reqTV, err := postFixtureRequest(client, base+"/api/request", reqTVBody)
 	if err != nil {
 		t.Fatalf("POST tv: %v", err)
 	}
-	defer reqTV.Body.Close()
+	defer func() { _ = reqTV.Body.Close() }()
 	var tvOut map[string]string
 	if err := json.NewDecoder(reqTV.Body).Decode(&tvOut); err != nil {
 		t.Fatalf("decode tv request: %v", err)
@@ -214,11 +235,11 @@ func TestAdminHTTP_FixtureMetadata_MovieAndTVFlows(t *testing.T) {
 	}
 
 	// History list
-	listResp, err := client.Get(base + "/api/requests")
+	listResp, err := getFixtureRequest(client, base+"/api/requests")
 	if err != nil {
 		t.Fatalf("GET /api/requests: %v", err)
 	}
-	defer listResp.Body.Close()
+	defer func() { _ = listResp.Body.Close() }()
 	var list []requestRecord
 	if err := json.NewDecoder(listResp.Body).Decode(&list); err != nil {
 		t.Fatalf("decode requests: %v", err)
@@ -249,7 +270,7 @@ func TestGRPC_FixtureMetadata_RequestMovieAndTV(t *testing.T) {
 	if err != nil {
 		t.Fatalf("metadataClient: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	mv, err := meta.Search(context.Background(), &metadatav1.SearchRequest{
 		Query: "Fight Club", Type: metadatav1.MediaType_MEDIA_TYPE_MOVIE, Page: 1,

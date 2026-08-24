@@ -304,7 +304,7 @@ func TestRefreshAcquisitionStatus_PersistsImportFailed(t *testing.T) {
 	if err := m2.Init(context.Background()); err != nil {
 		t.Fatalf("re-Init: %v", err)
 	}
-	defer m2.Stop(context.Background())
+	defer func() { _ = m2.Stop(context.Background()) }()
 	if m2.requests["r1"].Status != "import_failed" {
 		t.Fatalf("persisted status = %q", m2.requests["r1"].Status)
 	}

@@ -56,7 +56,7 @@ func TestRequestMovie_PersistsWhenLibraryUnavailable(t *testing.T) {
 	if err := m2.Init(context.Background()); err != nil {
 		t.Fatalf("re-Init: %v", err)
 	}
-	defer m2.Stop(context.Background())
+	defer func() { _ = m2.Stop(context.Background()) }()
 	st2, err := m2.GetStatus(context.Background(), &requestmedia.GetStatusRequest{RequestId: resp.GetRequestId()})
 	if err != nil {
 		t.Fatalf("GetStatus after reload: %v", err)
@@ -221,10 +221,10 @@ func startGRPC(t *testing.T, register func(*grpc.Server)) string {
 	}
 	srv := grpc.NewServer()
 	register(srv)
-	go srv.Serve(lis)
+	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(func() {
 		srv.Stop()
-		lis.Close()
+		_ = lis.Close()
 	})
 	return lis.Addr().String()
 }
@@ -490,4 +490,3 @@ func TestRequestTV_SeasonZeroDummyQueuesPack(t *testing.T) {
 		t.Fatalf("expected pack grain 0/0, got S%02dE%02d", autoStub.last.GetSeasonNumber(), autoStub.last.GetEpisodeNumber())
 	}
 }
-

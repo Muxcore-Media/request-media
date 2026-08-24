@@ -35,7 +35,7 @@ func (m *Module) RequestAlbum(ctx context.Context, req *requestmedia.RequestAlbu
 	albumID, artistID, status, err := m.fulfillMusicAlbum(ctx, fulfillParams{
 		RequestID: requestID, ItemType: "music_album", ReleaseGroupID: rgID,
 		MusicBrainzID: strings.TrimSpace(req.GetArtistMusicbrainzId()),
-		ArtistName: strings.TrimSpace(req.GetArtistName()), Title: req.GetTitle(), Year: req.GetYear(),
+		ArtistName:    strings.TrimSpace(req.GetArtistName()), Title: req.GetTitle(), Year: req.GetYear(),
 		Overview: req.GetOverview(), RequestedBy: requestedBy, TenantID: tenantID,
 	})
 	if err != nil {
@@ -62,8 +62,8 @@ func (m *Module) RequestTrack(ctx context.Context, req *requestmedia.RequestTrac
 			ID: requestID, ItemType: "music_track", Title: req.GetTitle(), Status: "pending",
 			RequestedBy: requestedBy, TenantID: tenantID, RecordingID: recID,
 			ReleaseGroupID: strings.TrimSpace(req.GetReleaseGroupId()),
-			MusicBrainzID: strings.TrimSpace(req.GetArtistMusicbrainzId()),
-			ArtistName: strings.TrimSpace(req.GetArtistName()), AlbumTitle: strings.TrimSpace(req.GetAlbumTitle()),
+			MusicBrainzID:  strings.TrimSpace(req.GetArtistMusicbrainzId()),
+			ArtistName:     strings.TrimSpace(req.GetArtistName()), AlbumTitle: strings.TrimSpace(req.GetAlbumTitle()),
 		})
 		return &requestmedia.RequestTrackResponse{RequestId: requestID, Status: "pending"}, nil
 	}
@@ -71,8 +71,8 @@ func (m *Module) RequestTrack(ctx context.Context, req *requestmedia.RequestTrac
 	albumID, artistID, status, err := m.fulfillMusicTrack(ctx, fulfillParams{
 		RequestID: requestID, ItemType: "music_track", RecordingID: recID,
 		ReleaseGroupID: strings.TrimSpace(req.GetReleaseGroupId()),
-		MusicBrainzID: strings.TrimSpace(req.GetArtistMusicbrainzId()),
-		ArtistName: strings.TrimSpace(req.GetArtistName()), Title: req.GetTitle(),
+		MusicBrainzID:  strings.TrimSpace(req.GetArtistMusicbrainzId()),
+		ArtistName:     strings.TrimSpace(req.GetArtistName()), Title: req.GetTitle(),
 		AlbumTitle: strings.TrimSpace(req.GetAlbumTitle()), RequestedBy: requestedBy, TenantID: tenantID,
 	})
 	if err != nil {
