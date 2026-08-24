@@ -12,7 +12,7 @@ func TestPutGetList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	rec := &Record{
 		ID: "req1", ItemType: "movie", ItemID: "mv1", TMDBID: 42,
@@ -67,13 +67,13 @@ func TestLoadAllPersistsAcrossOpen(t *testing.T) {
 	if err := s.Put(&Record{ID: "a", ItemType: "movie", Title: "A", Status: "requested"}); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	s.Close()
+	_ = s.Close()
 
 	s2, err := Open(path)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer s2.Close()
+	defer func() { _ = s2.Close() }()
 	all, err := s2.LoadAll()
 	if err != nil {
 		t.Fatalf("LoadAll: %v", err)
@@ -101,13 +101,13 @@ func TestPruneDuplicateTMDBRows(t *testing.T) {
 	if err := s.Put(&Record{ID: "star-movie", ItemType: "movie", TMDBID: 253, Title: "Star Trek", Status: "requested", CreatedAt: old}); err != nil {
 		t.Fatal(err)
 	}
-	s.Close()
+	_ = s.Close()
 
 	s2, err := Open(path)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer s2.Close()
+	defer func() { _ = s2.Close() }()
 	all, err := s2.LoadAll()
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestListScopedByTenant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if err := s.Put(&Record{ID: "a", ItemType: "movie", Title: "A", Status: "requested", TenantID: "t1"}); err != nil {
 		t.Fatal(err)
 	}

@@ -24,7 +24,7 @@ func (m *Module) handleDiscoverBrowse(w http.ResponseWriter, r *http.Request, pa
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "metadata module unavailable", "results": []searchResult{}})
 		return true
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	ctx, cancel := handlerContext(r)
 	defer cancel()

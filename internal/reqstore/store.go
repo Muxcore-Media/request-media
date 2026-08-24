@@ -41,7 +41,7 @@ func Open(path string) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return s, nil
@@ -92,7 +92,7 @@ func (s *Store) ensureColumn(name, ddl string) error {
 	if err != nil {
 		return fmt.Errorf("pragma table_info: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var cid int
 		var colName, colType string
@@ -191,14 +191,14 @@ func (s *Store) List(tenantID ...string) ([]*Record, error) {
 		`, tid)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT `+requestSelectCols+`
+			SELECT ` + requestSelectCols + `
 			FROM requests ORDER BY created_at DESC
 		`)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("list requests: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*Record
 	for rows.Next() {
 		r, err := scanRecord(rows)

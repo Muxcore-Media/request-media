@@ -60,7 +60,7 @@ func (m *Module) handleDiscover(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "metadata module unavailable"})
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	ctx, cancel := handlerContext(r)
 	defer cancel()

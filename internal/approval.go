@@ -132,7 +132,7 @@ func (m *Module) fulfillMovie(ctx context.Context, p fulfillParams) (string, str
 	if err != nil {
 		return "", "", fmt.Errorf("dial media-movies: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	moviesClient := mgmntv1.NewMovieManagementServiceClient(conn)
 	addResp, err := moviesClient.AddMovie(ctx, &mgmntv1.AddMovieRequest{
@@ -182,10 +182,10 @@ func (m *Module) fulfillTV(ctx context.Context, p fulfillParams) (string, string
 	if m.getPreferWorkflow() {
 		if runID, ok := m.tryRunWorkflow(ctx, "tv-request", map[string]string{
 			"title": p.Title, "year": fmt.Sprintf("%d", p.Year),
-			"tmdb_id": fmt.Sprintf("%d", p.TMDBID),
-			"season_number": fmt.Sprintf("%d", p.SeasonNumber),
+			"tmdb_id":        fmt.Sprintf("%d", p.TMDBID),
+			"season_number":  fmt.Sprintf("%d", p.SeasonNumber),
 			"episode_number": fmt.Sprintf("%d", p.EpisodeNumber),
-			"request_id": p.RequestID,
+			"request_id":     p.RequestID,
 		}); ok {
 			m.saveRequest(recBase("workflow", ""))
 			go m.publish(context.Background(), contracts.EventTVRequested, map[string]interface{}{
@@ -223,7 +223,7 @@ func (m *Module) fulfillTV(ctx context.Context, p fulfillParams) (string, string
 	if err != nil {
 		return "", "", fmt.Errorf("dial media-tvshows: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	tvClient := tvmgmtv1.NewTvManagementServiceClient(conn)
 	addResp, err := tvClient.AddTVShow(ctx, &tvmgmtv1.AddTVShowRequest{
