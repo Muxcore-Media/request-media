@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -16,7 +17,7 @@ import (
 
 	mgmntv1 "github.com/Muxcore-Media/media-movies/proto/mgmntv1"
 	tvmgmtv1 "github.com/Muxcore-Media/media-tvshows/proto/tvmgmtv1"
-	metadatav1 "github.com/Muxcore-Media/metadata-tmdb/proto/metadatav1"
+	metadatav1 "github.com/Muxcore-Media/contracts-metadata/muxcore/metadata/v1"
 	requestmedia "github.com/Muxcore-Media/request-media/proto/requestmedia"
 )
 
@@ -35,7 +36,7 @@ func (fixtureMetadata) Search(_ context.Context, req *metadatav1.SearchRequest) 
 			return &metadatav1.SearchResponse{
 				Results: []*metadatav1.SearchResult{{
 					Id: 1396, Name: "Breaking Bad", Title: "",
-					Overview: "A high school chemistry teacher diagnosed with inoperable lung cancer turns to manufacturing and selling methamphetamine in order to secure his family's future.",
+					Overview:   "A high school chemistry teacher diagnosed with inoperable lung cancer turns to manufacturing and selling methamphetamine in order to secure his family's future.",
 					PosterPath: "/ggFHVNu6YYI5L9W6QN5CvfWgmd.jpg", FirstAirDate: "2008-01-20",
 					VoteAverage: 8.918, MediaType: metadatav1.MediaType_MEDIA_TYPE_TV,
 				}},
@@ -47,7 +48,7 @@ func (fixtureMetadata) Search(_ context.Context, req *metadatav1.SearchRequest) 
 			return &metadatav1.SearchResponse{
 				Results: []*metadatav1.SearchResult{{
 					Id: 550, Title: "Fight Club",
-					Overview: "An insomniac office worker and a devil-may-care soap maker form an underground fight club that evolves into something much more.",
+					Overview:   "An insomniac office worker and a devil-may-care soap maker form an underground fight club that evolves into something much more.",
 					PosterPath: "/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg", ReleaseDate: "1999-10-15",
 					VoteAverage: 8.433, MediaType: metadatav1.MediaType_MEDIA_TYPE_MOVIE,
 				}},
@@ -76,14 +77,18 @@ func (fixtureMetadata) GetTVDetails(_ context.Context, req *metadatav1.GetTVDeta
 	}, nil
 }
 
-func testModuleHTTP(t *testing.T) (*Module, string) {
+func testHTTPClient() *http.Client {
+	return &http.Client{Timeout: 15 * time.Second}
+}
+
+func testModuleHTTP(t *testing.T) (*Module, string, *http.Client) {
 	t.Helper()
 	m := testModule(t)
 	if err := m.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	base := "http://" + m.httpLis.Addr().String()
-	return m, base
+	return m, base, testHTTPClient()
 }
 
 func wireFixtureStack(t *testing.T, m *Module) (movies *stubMovies, tv *stubTV) {
@@ -117,11 +122,11 @@ func wireFixtureStack(t *testing.T, m *Module) (movies *stubMovies, tv *stubTV) 
 }
 
 func TestAdminHTTP_FixtureMetadata_MovieAndTVFlows(t *testing.T) {
-	m, base := testModuleHTTP(t)
+	m, base, client := testModuleHTTP(t)
 	movies, tv := wireFixtureStack(t, m)
 
 	// Admin entry: index HTML
-	idxResp, err := http.Get(base + "/")
+	idxResp, err := client.Get(base + "/")
 	if err != nil {
 		t.Fatalf("GET /: %v", err)
 	}
@@ -135,7 +140,7 @@ func TestAdminHTTP_FixtureMetadata_MovieAndTVFlows(t *testing.T) {
 	}
 
 	// Movie search → request (Fight Club, TMDB_FIXTURE id 550)
-	searchMovie, err := http.Get(base + "/api/search?q=Fight+Club&type=movie")
+	searchMovie, err := client.Get(base + "/api/search?q=Fight+Club&type=movie")
 	if err != nil {
 		t.Fatalf("search movie: %v", err)
 	}
@@ -155,7 +160,7 @@ func TestAdminHTTP_FixtureMetadata_MovieAndTVFlows(t *testing.T) {
 	}
 
 	reqMovieBody := `{"tmdbId":550,"title":"Fight Club","year":1999,"overview":"soap","poster":"/p.jpg","type":"movie"}`
-	reqMovie, err := http.Post(base+"/api/request", "application/json", strings.NewReader(reqMovieBody))
+	reqMovie, err := client.Post(base+"/api/request", "application/json", strings.NewReader(reqMovieBody))
 	if err != nil {
 		t.Fatalf("POST movie: %v", err)
 	}
@@ -172,7 +177,7 @@ func TestAdminHTTP_FixtureMetadata_MovieAndTVFlows(t *testing.T) {
 	}
 
 	// TV search → request (Breaking Bad, TMDB_FIXTURE id 1396)
-	searchTV, err := http.Get(base + "/api/search?q=Breaking+Bad&type=tv")
+	searchTV, err := client.Get(base + "/api/search?q=Breaking+Bad&type=tv")
 	if err != nil {
 		t.Fatalf("search tv: %v", err)
 	}
@@ -192,7 +197,7 @@ func TestAdminHTTP_FixtureMetadata_MovieAndTVFlows(t *testing.T) {
 	}
 
 	reqTVBody := `{"tmdbId":1396,"title":"Breaking Bad","year":2008,"overview":"chem","type":"tv"}`
-	reqTV, err := http.Post(base+"/api/request", "application/json", strings.NewReader(reqTVBody))
+	reqTV, err := client.Post(base+"/api/request", "application/json", strings.NewReader(reqTVBody))
 	if err != nil {
 		t.Fatalf("POST tv: %v", err)
 	}
@@ -209,7 +214,7 @@ func TestAdminHTTP_FixtureMetadata_MovieAndTVFlows(t *testing.T) {
 	}
 
 	// History list
-	listResp, err := http.Get(base + "/api/requests")
+	listResp, err := client.Get(base + "/api/requests")
 	if err != nil {
 		t.Fatalf("GET /api/requests: %v", err)
 	}

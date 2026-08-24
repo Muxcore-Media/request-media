@@ -2,11 +2,12 @@ package internal
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
-	metadatav1 "github.com/Muxcore-Media/metadata-tmdb/proto/metadatav1"
+	metadatav1 "github.com/Muxcore-Media/contracts-metadata/muxcore/metadata/v1"
 )
 
 type discoverTrailer struct {
@@ -16,18 +17,18 @@ type discoverTrailer struct {
 }
 
 type discoverDetail struct {
-	ID        int32           `json:"id"`
-	Title     string          `json:"title"`
-	Year      int32           `json:"year"`
-	Overview  string          `json:"overview"`
-	Tagline   string          `json:"tagline"`
-	Genres    []string        `json:"genres"`
-	Poster    string          `json:"poster"`
-	Backdrop  string          `json:"backdrop"`
-	VoteAvg   float64         `json:"voteAvg"`
-	Runtime   int32           `json:"runtime,omitempty"`
-	Status    string          `json:"status,omitempty"`
-	MediaType string          `json:"mediaType"`
+	ID        int32            `json:"id"`
+	Title     string           `json:"title"`
+	Year      int32            `json:"year"`
+	Overview  string           `json:"overview"`
+	Tagline   string           `json:"tagline"`
+	Genres    []string         `json:"genres"`
+	Poster    string           `json:"poster"`
+	Backdrop  string           `json:"backdrop"`
+	VoteAvg   float64          `json:"voteAvg"`
+	Runtime   int32            `json:"runtime,omitempty"`
+	Status    string           `json:"status,omitempty"`
+	MediaType string           `json:"mediaType"`
 	Trailer   *discoverTrailer `json:"trailer,omitempty"`
 }
 
@@ -38,6 +39,11 @@ func (m *Module) handleDiscover(w http.ResponseWriter, r *http.Request) {
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/discover/")
 	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 3 {
+		if m.handleDiscoverBrowse(w, r, parts) {
+			return
+		}
+	}
 	if len(parts) != 2 {
 		http.NotFound(w, r)
 		return
@@ -56,11 +62,14 @@ func (m *Module) handleDiscover(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	ctx, cancel := handlerContext(r)
+	defer cancel()
+
 	switch kind {
 	case "movie", "movies":
-		resp, err := client.GetMovieDetails(r.Context(), &metadatav1.GetMovieDetailsRequest{
-			TmdbId:             int32(id),
-			AppendToResponse:   []string{"videos"},
+		resp, err := client.GetMovieDetails(ctx, &metadatav1.GetMovieDetailsRequest{
+			TmdbId:           int32(id),
+			AppendToResponse: []string{"videos"},
 		})
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
@@ -68,7 +77,7 @@ func (m *Module) handleDiscover(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, mapMovieDiscover(resp))
 	case "tv", "series", "show", "shows":
-		resp, err := client.GetTVDetails(r.Context(), &metadatav1.GetTVDetailsRequest{
+		resp, err := client.GetTVDetails(ctx, &metadatav1.GetTVDetailsRequest{
 			TmdbId:           int32(id),
 			AppendToResponse: []string{"videos"},
 		})
@@ -188,5 +197,7 @@ func pickTrailer(videos []*metadatav1.Video) *discoverTrailer {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Warn("request-media: write JSON response", "error", err)
+	}
 }

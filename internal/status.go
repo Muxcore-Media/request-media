@@ -2,16 +2,21 @@ package internal
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
-	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
+	automationv1 "github.com/Muxcore-Media/contracts-automation/muxcore/automation/v1"
 )
 
 func statusRank(s string) int {
 	switch s {
 	case "available":
+		return 6
+	case "import_failed", "failed":
+		return 5
+	case "stalled":
 		return 4
 	case "downloading":
 		return 3
@@ -24,6 +29,89 @@ func statusRank(s string) int {
 	default:
 		return 0
 	}
+}
+
+func historyStatusPriority(histStatus string) int {
+	switch histStatus {
+	case "import_failed", "failed":
+		return 3
+	case "stalled":
+		return 2
+	case "sent":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func historyToRequestStatus(histStatus string) string {
+	switch histStatus {
+	case "sent":
+		return "downloading"
+	case "stalled", "import_failed", "failed":
+		return histStatus
+	default:
+		return ""
+	}
+}
+
+func isInProgressRequestStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "available", "denied", "":
+		return false
+	default:
+		return true
+	}
+}
+
+func queueItemIDs(itemType string, tmdb int32, title string, queue []*automationv1.QueueItem) map[string]struct{} {
+	title = strings.TrimSpace(title)
+	idSet := map[string]struct{}{}
+	for _, q := range queue {
+		if q == nil || q.GetItemType() != itemType {
+			continue
+		}
+		match := tmdb > 0 && q.GetTmdbId() == tmdb
+		if !match && tmdb == 0 && title != "" && strings.EqualFold(strings.TrimSpace(q.GetTitle()), title) {
+			match = true
+		}
+		if match {
+			idSet[q.GetItemId()] = struct{}{}
+		}
+	}
+	return idSet
+}
+
+func bestHistoryRecord(idSet map[string]struct{}, hist []*automationv1.DownloadRecord) *automationv1.DownloadRecord {
+	if len(idSet) == 0 {
+		return nil
+	}
+	var best *automationv1.DownloadRecord
+	bestPri := 0
+	for _, h := range hist {
+		if h == nil {
+			continue
+		}
+		if _, ok := idSet[h.GetWantedItemId()]; !ok {
+			continue
+		}
+		switch h.GetStatus() {
+		case "sent", "stalled", "import_failed", "failed":
+			if p := historyStatusPriority(h.GetStatus()); p > bestPri {
+				bestPri = p
+				best = h
+			}
+		}
+	}
+	return best
+}
+
+func deriveHistoryStatusFields(itemType string, tmdb int32, title string, queue []*automationv1.QueueItem, hist []*automationv1.DownloadRecord) (detail, label string) {
+	best := bestHistoryRecord(queueItemIDs(itemType, tmdb, title, queue), hist)
+	if best == nil {
+		return "", ""
+	}
+	return strings.TrimSpace(best.GetStatusDetail()), strings.TrimSpace(best.GetStatusLabel())
 }
 
 func seasonZeroPlaceholder(itemType string, q *automationv1.QueueItem) bool {
@@ -65,7 +153,9 @@ func deriveAcquisitionStatus(itemType string, tmdb int32, title string, queue []
 	for _, id := range ids {
 		idSet[id] = struct{}{}
 	}
-	hasSent, hasCompleted := false, false
+	var bestHistStatus string
+	bestHistPri := 0
+	hasCompleted := false
 	for _, h := range hist {
 		if h == nil {
 			continue
@@ -74,8 +164,11 @@ func deriveAcquisitionStatus(itemType string, tmdb int32, title string, queue []
 			continue
 		}
 		switch h.GetStatus() {
-		case "sent", "stalled", "import_failed":
-			hasSent = true
+		case "sent", "stalled", "import_failed", "failed":
+			if p := historyStatusPriority(h.GetStatus()); p > bestHistPri {
+				bestHistPri = p
+				bestHistStatus = h.GetStatus()
+			}
 		case "completed":
 			hasCompleted = true
 		}
@@ -83,7 +176,10 @@ func deriveAcquisitionStatus(itemType string, tmdb int32, title string, queue []
 	if owned > 0 && missing == 0 {
 		return "available"
 	}
-	if hasSent || (owned > 0 && missing > 0) || (hasCompleted && missing > 0) {
+	if bestHistStatus != "" {
+		return historyToRequestStatus(bestHistStatus)
+	}
+	if (owned > 0 && missing > 0) || (hasCompleted && missing > 0) {
 		return "downloading"
 	}
 	if missing > 0 {
@@ -190,4 +286,37 @@ func fetchRecentHistory(ctx context.Context, ac automationv1.AutomationServiceCl
 		page++
 	}
 	return out, nil
+}
+
+type automationSnapshot struct {
+	queue []*automationv1.QueueItem
+	hist  []*automationv1.DownloadRecord
+}
+
+func (m *Module) fetchAutomationSnapshot(ctx context.Context) (*automationSnapshot, error) {
+	if err := m.ensureAutomation(ctx); err != nil {
+		return nil, err
+	}
+	m.mu.RLock()
+	ac := m.automationClient
+	m.mu.RUnlock()
+	if ac == nil {
+		return nil, fmt.Errorf("automation client unavailable")
+	}
+	queue, err := fetchAllQueue(ctx, ac)
+	if err != nil {
+		return nil, err
+	}
+	hist, err := fetchRecentHistory(ctx, ac)
+	if err != nil {
+		return nil, err
+	}
+	return &automationSnapshot{queue: queue, hist: hist}, nil
+}
+
+func applyHistoryStatusFields(rec *requestRecord, snap *automationSnapshot) (detail, label string) {
+	if rec == nil || snap == nil || !isInProgressRequestStatus(rec.Status) {
+		return "", ""
+	}
+	return deriveHistoryStatusFields(rec.ItemType, rec.TMDBID, rec.Title, snap.queue, snap.hist)
 }

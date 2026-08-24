@@ -22,8 +22,8 @@ import (
 	workflowv1 "github.com/Muxcore-Media/core/proto/gen/muxcore/workflow/v1"
 	"github.com/Muxcore-Media/core/sdk/go/client"
 	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
-	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
-	metadatav1 "github.com/Muxcore-Media/metadata-tmdb/proto/metadatav1"
+	automationv1 "github.com/Muxcore-Media/contracts-automation/muxcore/automation/v1"
+	metadatav1 "github.com/Muxcore-Media/contracts-metadata/muxcore/metadata/v1"
 	"github.com/Muxcore-Media/request-media/internal/reqstore"
 	requestmedia "github.com/Muxcore-Media/request-media/proto/requestmedia"
 )
@@ -31,21 +31,23 @@ import (
 type Module struct {
 	requestmedia.UnimplementedRequestServiceServer
 
-	mu             sync.RWMutex
-	cfgMu          sync.RWMutex
-	mc             *client.Client
-	store          *reqstore.Partitions
-	id             string
-	grpcAddr       string
-	httpAddr       string
-	dataDir        string
-	preferWorkflow  bool
-	requireApproval bool
-	requests        map[string]*requestRecord
-	grpcSrv         *grpc.Server
-	httpSrv         *http.Server
-	lis             net.Listener
-	httpLis         net.Listener
+	mu                  sync.RWMutex
+	cfgMu               sync.RWMutex
+	mc                  *client.Client
+	store               *reqstore.Partitions
+	id                  string
+	grpcAddr            string
+	httpAddr            string
+	dataDir             string
+	preferWorkflow      bool
+	requireApproval     bool
+	allowedRequestRoles string
+	managerAutoApprove  bool
+	requests            map[string]*requestRecord
+	grpcSrv             *grpc.Server
+	httpSrv             *http.Server
+	lis                 net.Listener
+	httpLis             net.Listener
 
 	// findAddr overrides capability discovery in tests.
 	findAddr func(ctx context.Context, capability string) (string, error)
@@ -56,21 +58,28 @@ type Module struct {
 }
 
 type requestRecord struct {
-	ID          string    `json:"id"`
-	ItemType    string    `json:"itemType"`
-	ItemID      string    `json:"itemId"`
-	TMDBID      int32     `json:"tmdbId"`
-	Title       string    `json:"title"`
-	Year        int32     `json:"year"`
-	Overview    string    `json:"overview,omitempty"`
-	Poster      string    `json:"poster"`
-	Status      string    `json:"status"`
-	RequestedBy string    `json:"requestedBy,omitempty"`
-	ApprovedBy  string    `json:"approvedBy,omitempty"`
-	ApprovedAt  time.Time `json:"approvedAt,omitempty"`
-	TenantID    string    `json:"tenantId,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID             string    `json:"id"`
+	ItemType       string    `json:"itemType"`
+	ItemID         string    `json:"itemId"`
+	TMDBID         int32     `json:"tmdbId"`
+	Title          string    `json:"title"`
+	Year           int32     `json:"year"`
+	Overview       string    `json:"overview,omitempty"`
+	Poster         string    `json:"poster"`
+	Status         string    `json:"status"`
+	StatusDetail   string    `json:"statusDetail,omitempty"`
+	StatusLabel    string    `json:"statusLabel,omitempty"`
+	RequestedBy    string    `json:"requestedBy,omitempty"`
+	ApprovedBy     string    `json:"approvedBy,omitempty"`
+	ApprovedAt     time.Time `json:"approvedAt,omitempty"`
+	TenantID       string    `json:"tenantId,omitempty"`
+	MusicBrainzID  string    `json:"musicbrainzId,omitempty"`
+	ReleaseGroupID string    `json:"releaseGroupId,omitempty"`
+	RecordingID    string    `json:"recordingId,omitempty"`
+	ArtistName     string    `json:"artistName,omitempty"`
+	AlbumTitle     string    `json:"albumTitle,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 type Config struct {
@@ -99,7 +108,7 @@ func NewModule(cfg Config) *Module {
 			cfg.HTTPAddr = v
 		}
 		if cfg.HTTPAddr == "" {
-			cfg.HTTPAddr = ":9380"
+			cfg.HTTPAddr = "127.0.0.1:9380"
 		}
 	}
 	if cfg.DataDir == "" {
@@ -128,14 +137,22 @@ func NewModule(cfg Config) *Module {
 			requireApproval = b
 		}
 	}
+	managerAutoApprove := true
+	if v := os.Getenv("REQUEST_MANAGER_AUTO_APPROVE"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			managerAutoApprove = b
+		}
+	}
 	return &Module{
-		id:              cfg.ID,
-		grpcAddr:        cfg.GRPCAddr,
-		httpAddr:        cfg.HTTPAddr,
-		dataDir:         cfg.DataDir,
-		preferWorkflow:  prefer,
-		requireApproval: requireApproval,
-		requests:        make(map[string]*requestRecord),
+		id:                  cfg.ID,
+		grpcAddr:            cfg.GRPCAddr,
+		httpAddr:            cfg.HTTPAddr,
+		dataDir:             cfg.DataDir,
+		preferWorkflow:      prefer,
+		requireApproval:     requireApproval,
+		allowedRequestRoles: parseAllowedRolesEnv(),
+		managerAutoApprove:  managerAutoApprove,
+		requests:            make(map[string]*requestRecord),
 	}
 }
 
@@ -202,7 +219,7 @@ func (m *Module) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/requests", m.handleRequests)
 	mux.HandleFunc("/", m.handleIndex)
 
-	m.httpSrv = &http.Server{Handler: tenant.Middleware(mux)}
+	m.httpSrv = moduleHTTPServer(tenant.Middleware(mux))
 
 	go m.dialCore(ctx)
 	statusCtx, cancel := context.WithCancel(context.Background())
@@ -230,7 +247,9 @@ func (m *Module) Stop(ctx context.Context) error {
 		m.statusCancel = nil
 	}
 	if m.httpSrv != nil {
-		m.httpSrv.Close()
+		if err := m.httpSrv.Shutdown(ctx); err != nil {
+			slog.Warn("request-media HTTP shutdown", "error", err)
+		}
 	}
 	if m.grpcSrv != nil {
 		m.grpcSrv.GracefulStop()
@@ -572,13 +591,18 @@ func (m *Module) metadataClient(ctx context.Context) (metadatav1.MetadataService
 // --- HTTP Handlers ---
 
 type searchResult struct {
-	ID        int32   `json:"id"`
-	Title     string  `json:"title"`
-	Year      int32   `json:"year"`
-	Overview  string  `json:"overview"`
-	Poster    string  `json:"poster"`
-	VoteAvg   float64 `json:"voteAvg"`
-	MediaType string  `json:"mediaType"`
+	ID             int32   `json:"id"`
+	MusicBrainzID  string  `json:"musicbrainzId,omitempty"`
+	ReleaseGroupID string  `json:"releaseGroupId,omitempty"`
+	RecordingID    string  `json:"recordingId,omitempty"`
+	ArtistName     string  `json:"artistName,omitempty"`
+	AlbumTitle     string  `json:"albumTitle,omitempty"`
+	Title          string  `json:"title"`
+	Year           int32   `json:"year"`
+	Overview       string  `json:"overview"`
+	Poster         string  `json:"poster"`
+	VoteAvg        float64 `json:"voteAvg"`
+	MediaType      string  `json:"mediaType"`
 }
 
 func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -588,33 +612,50 @@ func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query().Get("q")
 	if q == "" {
-		json.NewEncoder(w).Encode([]searchResult{})
+		writeJSON(w, http.StatusOK, []searchResult{})
+		return
+	}
+
+	kind := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("type")))
+	if isMusicAlbumSearch(kind) {
+		m.handleMusicAlbumSearch(w, r, q)
+		return
+	}
+	if isMusicTrackSearch(kind) {
+		m.handleMusicTrackSearch(w, r, q)
+		return
+	}
+	if isMusicRequest(kind) {
+		m.handleMusicSearch(w, r, q)
 		return
 	}
 
 	client, conn, err := m.metadataClient(r.Context())
 	if err != nil {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"error": "metadata module unavailable", "results": []searchResult{},
 		})
 		return
 	}
 	defer conn.Close()
 
+	ctx, cancel := handlerContext(r)
+	defer cancel()
+
 	reqType := searchTypeFromQuery(r.URL.Query().Get("type"))
-	resp, err := client.Search(r.Context(), &metadatav1.SearchRequest{
+	resp, err := client.Search(ctx, &metadatav1.SearchRequest{
 		Query: q,
 		Type:  reqType,
 		Page:  1,
 	})
 	if err != nil {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, http.StatusBadGateway, map[string]any{
 			"error": err.Error(), "results": []searchResult{},
 		})
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"results": mapSearchResults(q, reqType, resp.GetResults()),
 	})
 }
@@ -625,16 +666,20 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		TMDBID      int32  `json:"tmdbId"`
-		Title       string `json:"title"`
-		Year        int32  `json:"year"`
-		Overview    string `json:"overview"`
-		Poster      string `json:"poster"`
-		MediaType   string `json:"mediaType"`
-		ItemType    string `json:"itemType"`
-		Type        string `json:"type"`
-		RequestedBy string `json:"requestedBy"`
-		IsAdmin     bool   `json:"isAdmin"`
+		TMDBID         int32  `json:"tmdbId"`
+		MusicBrainzID  string `json:"musicbrainzId"`
+		ReleaseGroupID string `json:"releaseGroupId"`
+		RecordingID    string `json:"recordingId"`
+		ArtistName     string `json:"artistName"`
+		AlbumTitle     string `json:"albumTitle"`
+		Title          string `json:"title"`
+		Year           int32  `json:"year"`
+		Overview       string `json:"overview"`
+		Poster         string `json:"poster"`
+		MediaType      string `json:"mediaType"`
+		ItemType       string `json:"itemType"`
+		Type           string `json:"type"`
+		RequestedBy    string `json:"requestedBy"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
@@ -643,9 +688,13 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 	if req.RequestedBy == "" {
 		req.RequestedBy = strings.TrimSpace(r.Header.Get("X-MuxCore-User"))
 	}
-	if !req.IsAdmin {
-		roles := strings.ToLower(r.Header.Get("X-MuxCore-Roles"))
-		req.IsAdmin = strings.Contains(roles, "admin")
+	roles := splitRoles(r.Header.Get("X-MuxCore-Roles"))
+	isAdmin := isPrivilegedRequestor(roles, m.getManagerAutoApprove()) || containsRole(roles, "admin")
+	if !m.rolesCanRequest(roles) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: your role cannot request media"})
+		return
 	}
 	tenantID := m.resolveTenant(r.Context(), r.Header)
 	ctx := tenant.WithID(r.Context(), tenantID)
@@ -658,10 +707,72 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 	if kind == "" {
 		kind = req.Type
 	}
+	if isMusicAlbumRequest(kind) {
+		gResp, err := m.RequestAlbum(ctx, &requestmedia.RequestAlbumRequest{
+			ReleaseGroupId: req.ReleaseGroupID, ArtistMusicbrainzId: req.MusicBrainzID,
+			ArtistName: req.ArtistName, Title: req.Title, Year: req.Year, Overview: req.Overview,
+			RequestedBy: req.RequestedBy, IsAdmin: isAdmin,
+		})
+		if err != nil {
+			slog.Error("request music album", "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{
+			"requestId": gResp.GetRequestId(),
+			"albumId":   gResp.GetAlbumId(),
+			"artistId":  gResp.GetArtistId(),
+			"status":    gResp.GetStatus(),
+			"itemType":  "music_album",
+			"type":      "music_album",
+		})
+		return
+	}
+	if isMusicTrackRequest(kind) {
+		gResp, err := m.RequestTrack(ctx, &requestmedia.RequestTrackRequest{
+			RecordingId: req.RecordingID, ReleaseGroupId: req.ReleaseGroupID,
+			ArtistMusicbrainzId: req.MusicBrainzID, ArtistName: req.ArtistName,
+			Title: req.Title, AlbumTitle: req.AlbumTitle,
+			RequestedBy: req.RequestedBy, IsAdmin: isAdmin,
+		})
+		if err != nil {
+			slog.Error("request music track", "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{
+			"requestId": gResp.GetRequestId(),
+			"albumId":   gResp.GetAlbumId(),
+			"artistId":  gResp.GetArtistId(),
+			"status":    gResp.GetStatus(),
+			"itemType":  "music_track",
+			"type":      "music_track",
+		})
+		return
+	}
+	if isMusicRequest(kind) {
+		gResp, err := m.RequestMusic(ctx, &requestmedia.RequestMusicRequest{
+			MusicbrainzId: req.MusicBrainzID, Title: req.Title, Overview: req.Overview,
+			RequestedBy: req.RequestedBy, IsAdmin: isAdmin,
+		})
+		if err != nil {
+			slog.Error("request music", "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{
+			"requestId": gResp.GetRequestId(),
+			"artistId":  gResp.GetArtistId(),
+			"status":    gResp.GetStatus(),
+			"itemType":  "music",
+			"type":      "music",
+		})
+		return
+	}
 	if isTVRequest(kind) {
 		gResp, err := m.RequestTV(ctx, &requestmedia.RequestTVRequest{
 			TmdbId: req.TMDBID, Title: req.Title, Year: req.Year, Overview: req.Overview,
-			RequestedBy: req.RequestedBy, IsAdmin: req.IsAdmin,
+			RequestedBy: req.RequestedBy, IsAdmin: isAdmin,
 		})
 		if err != nil {
 			slog.Error("request tv", "error", err)
@@ -680,7 +791,7 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 
 	gResp, err := m.RequestMovie(ctx, &requestmedia.RequestMovieRequest{
 		TmdbId: req.TMDBID, Title: req.Title, Year: req.Year, Overview: req.Overview,
-		RequestedBy: req.RequestedBy, IsAdmin: req.IsAdmin,
+		RequestedBy: req.RequestedBy, IsAdmin: isAdmin,
 	})
 	if err != nil {
 		slog.Error("request movie", "error", err)
@@ -702,6 +813,19 @@ func (m *Module) handleRequests(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	roles := splitRoles(r.Header.Get("X-MuxCore-Roles"))
+	if len(roles) == 0 && !allowAnonymousRequest() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "authentication required"})
+		return
+	}
+	if len(roles) > 0 && !m.rolesCanRequest(roles) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+		return
+	}
 	statusFilter := r.URL.Query().Get("status")
 	resp, err := m.ListRequests(r.Context(), &requestmedia.ListRequestsRequest{Status: statusFilter})
 	if err != nil {
@@ -713,7 +837,8 @@ func (m *Module) handleRequests(w http.ResponseWriter, r *http.Request) {
 		rec := &requestRecord{
 			ID: info.GetRequestId(), ItemType: info.GetItemType(), ItemID: info.GetItemId(),
 			TMDBID: info.GetTmdbId(), Title: info.GetTitle(), Year: info.GetYear(),
-			Status: info.GetStatus(), RequestedBy: info.GetRequestedBy(), ApprovedBy: info.GetApprovedBy(),
+			Status: info.GetStatus(), StatusDetail: info.GetStatusDetail(), StatusLabel: info.GetStatusLabel(),
+			RequestedBy: info.GetRequestedBy(), ApprovedBy: info.GetApprovedBy(),
 			Poster: info.GetPoster(),
 		}
 		if info.GetCreatedAt() != "" {
@@ -752,6 +877,14 @@ func (m *Module) handleRequestAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	roles := splitRoles(r.Header.Get("X-MuxCore-Roles"))
+	if len(roles) == 0 && !allowAnonymousRequest() {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	if !rolesCanApprove(roles) {
+		http.Error(w, "forbidden: admin or manager required", http.StatusForbidden)
+		return
+	}
 	claimTenant := strings.TrimSpace(r.Header.Get("X-Auth-Claims-Tenant"))
 	headerTenant := strings.TrimSpace(r.Header.Get("X-Tenant-ID"))
 	if claimTenant != "" && headerTenant != "" {
@@ -1126,7 +1259,7 @@ func (m *Module) RequestMovie(ctx context.Context, req *requestmedia.RequestMovi
 	requestedBy := strings.TrimSpace(req.GetRequestedBy())
 	posterPath := requestPosterFromContext(ctx)
 
-	if m.needsApproval(requestedBy, req.GetIsAdmin()) {
+	if m.needsApproval(requestedBy, rolesFromIsAdmin(req.GetIsAdmin())) {
 		m.saveRequest(&requestRecord{
 			ID: requestID, ItemType: "movie", Title: req.GetTitle(),
 			Year: req.GetYear(), TMDBID: req.GetTmdbId(), Overview: req.GetOverview(),
@@ -1162,7 +1295,7 @@ func (m *Module) RequestTV(ctx context.Context, req *requestmedia.RequestTVReque
 	requestedBy := strings.TrimSpace(req.GetRequestedBy())
 	posterPath := requestPosterFromContext(ctx)
 
-	if m.needsApproval(requestedBy, req.GetIsAdmin()) {
+	if m.needsApproval(requestedBy, rolesFromIsAdmin(req.GetIsAdmin())) {
 		m.saveRequest(&requestRecord{
 			ID: requestID, ItemType: "tv", Title: req.GetTitle(),
 			Year: req.GetYear(), TMDBID: req.GetTmdbId(), Overview: req.GetOverview(),
@@ -1187,10 +1320,69 @@ func (m *Module) RequestTV(ctx context.Context, req *requestmedia.RequestTVReque
 	}, nil
 }
 
+func (m *Module) RequestMusic(ctx context.Context, req *requestmedia.RequestMusicRequest) (*requestmedia.RequestMusicResponse, error) {
+	tenantID := m.resolveTenant(ctx, nil)
+	if existing := m.findExistingMusic(req.GetMusicbrainzId(), req.GetTitle(), tenantID); existing != nil {
+		slog.Info("music already requested", "title", req.GetTitle(), "mbid", req.GetMusicbrainzId(), "request_id", existing.ID)
+		return &requestmedia.RequestMusicResponse{
+			RequestId: existing.ID, ArtistId: existing.ItemID, Status: existing.Status,
+		}, nil
+	}
+	requestID := fmt.Sprintf("req_mu_%d", time.Now().UnixNano())
+	requestedBy := strings.TrimSpace(req.GetRequestedBy())
+	posterPath := requestPosterFromContext(ctx)
+	if posterPath == "" {
+		posterPath = strings.TrimSpace(req.GetPoster())
+	}
+
+	if m.needsApproval(requestedBy, rolesFromIsAdmin(req.GetIsAdmin())) {
+		m.saveRequest(&requestRecord{
+			ID: requestID, ItemType: "music", Title: req.GetTitle(),
+			MusicBrainzID: req.GetMusicbrainzId(), Overview: req.GetOverview(),
+			Poster: posterPath, Status: "pending",
+			RequestedBy: requestedBy, TenantID: tenantID,
+		})
+		slog.Info("music request pending approval", "title", req.GetTitle(), "mbid", req.GetMusicbrainzId(), "by", requestedBy)
+		return &requestmedia.RequestMusicResponse{RequestId: requestID, Status: "pending"}, nil
+	}
+
+	artistID, status, err := m.fulfillRequest(ctx, fulfillParams{
+		RequestID: requestID, ItemType: "music", MusicBrainzID: req.GetMusicbrainzId(),
+		Title: req.GetTitle(), Overview: req.GetOverview(), Poster: posterPath,
+		RequestedBy: requestedBy, TenantID: tenantID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &requestmedia.RequestMusicResponse{
+		RequestId: requestID, ArtistId: artistID, Status: status,
+	}, nil
+}
+
+func (m *Module) findExistingMusic(mbid, title, tenantID string) *requestRecord {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, rec := range m.requests {
+		if rec.ItemType != "music" {
+			continue
+		}
+		if tenantID != "" && rec.TenantID != "" && rec.TenantID != tenantID {
+			continue
+		}
+		if mbid != "" && rec.MusicBrainzID == mbid {
+			return rec
+		}
+		if mbid == "" && title != "" && strings.EqualFold(rec.Title, title) {
+			return rec
+		}
+	}
+	return nil
+}
+
 func (m *Module) GetStatus(ctx context.Context, req *requestmedia.GetStatusRequest) (*requestmedia.GetStatusResponse, error) {
 	refreshCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
 	m.refreshAcquisitionStatus(refreshCtx)
-	cancel()
 	m.mu.RLock()
 	rec, ok := m.requests[req.GetRequestId()]
 	m.mu.RUnlock()
@@ -1211,6 +1403,14 @@ func (m *Module) GetStatus(ctx context.Context, req *requestmedia.GetStatusReque
 	}
 	if !rec.ApprovedAt.IsZero() {
 		resp.ApprovedAt = rec.ApprovedAt.Format(time.RFC3339)
+	}
+	if isInProgressRequestStatus(rec.Status) {
+		if snap, err := m.fetchAutomationSnapshot(refreshCtx); err == nil {
+			if detail, label := applyHistoryStatusFields(rec, snap); detail != "" || label != "" {
+				resp.StatusDetail = detail
+				resp.StatusLabel = label
+			}
+		}
 	}
 	return resp, nil
 }

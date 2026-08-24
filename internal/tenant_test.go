@@ -100,6 +100,8 @@ func TestHTTPRequestResolvesTenantHeader(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/api/request", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("X-Tenant-ID", "org-z")
+	r.Header.Set("X-MuxCore-Roles", "user")
+	r.Header.Set("X-MuxCore-User", "tester")
 	r = r.WithContext(tenant.WithID(r.Context(), "org-z"))
 	w := httptest.NewRecorder()
 	m.handleRequest(w, r)

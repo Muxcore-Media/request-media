@@ -19,16 +19,19 @@ import (
 )
 
 // needsApproval reports whether a new request should stay pending until an admin approves.
-// REQUEST_REQUIRE_APPROVAL=true always requires approval. Otherwise only non-admin requestors
-// are held; empty identity keeps auto-queue behavior for backward compatibility.
-func (m *Module) needsApproval(requestedBy string, isAdmin bool) bool {
+// REQUEST_REQUIRE_APPROVAL=true always requires approval. Managers skip approval when
+// REQUEST_MANAGER_AUTO_APPROVE=true (Seerr-style). Empty identity keeps auto-queue behavior.
+func (m *Module) needsApproval(requestedBy string, roles []string) bool {
 	if m.getRequireApproval() {
 		return true
 	}
 	if strings.TrimSpace(requestedBy) == "" {
 		return false
 	}
-	return !isAdmin
+	if isPrivilegedRequestor(roles, m.getManagerAutoApprove()) {
+		return false
+	}
+	return true
 }
 
 func (m *Module) getRequireApproval() bool {
@@ -39,8 +42,13 @@ func (m *Module) getRequireApproval() bool {
 
 type fulfillParams struct {
 	RequestID      string
-	ItemType       string // movie | tv
+	ItemType       string // movie | tv | music
 	TMDBID         int32
+	MusicBrainzID  string
+	ReleaseGroupID string
+	RecordingID    string
+	ArtistName     string
+	AlbumTitle     string
 	Title          string
 	Year           int32
 	Overview       string
@@ -56,10 +64,20 @@ type fulfillParams struct {
 }
 
 func (m *Module) fulfillRequest(ctx context.Context, p fulfillParams) (itemID, status string, err error) {
-	if p.ItemType == "tv" {
+	switch p.ItemType {
+	case "tv":
 		return m.fulfillTV(ctx, p)
+	case "music":
+		return m.fulfillMusic(ctx, p)
+	case "music_album":
+		albumID, _, status, err := m.fulfillMusicAlbum(ctx, p)
+		return albumID, status, err
+	case "music_track":
+		albumID, _, status, err := m.fulfillMusicTrack(ctx, p)
+		return albumID, status, err
+	default:
+		return m.fulfillMovie(ctx, p)
 	}
-	return m.fulfillMovie(ctx, p)
 }
 
 func (m *Module) fulfillMovie(ctx context.Context, p fulfillParams) (string, string, error) {
@@ -240,8 +258,8 @@ func (m *Module) fulfillTV(ctx context.Context, p fulfillParams) (string, string
 
 func (m *Module) ListRequests(ctx context.Context, req *requestmedia.ListRequestsRequest) (*requestmedia.ListRequestsResponse, error) {
 	refreshCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
 	m.refreshAcquisitionStatus(refreshCtx)
-	cancel()
 
 	filter := strings.ToLower(strings.TrimSpace(req.GetStatus()))
 	tenantID := m.resolveTenant(ctx, nil)
@@ -263,6 +281,12 @@ func (m *Module) ListRequests(ctx context.Context, req *requestmedia.ListRequest
 	})
 
 	out := &requestmedia.ListRequestsResponse{}
+	var snap *automationSnapshot
+	if needsHistoryStatusFields(list) {
+		if s, err := m.fetchAutomationSnapshot(refreshCtx); err == nil {
+			snap = s
+		}
+	}
 	for _, rec := range list {
 		info := &requestmedia.RequestInfo{
 			RequestId: rec.ID, ItemType: rec.ItemType, ItemId: rec.ItemID,
@@ -273,9 +297,22 @@ func (m *Module) ListRequests(ctx context.Context, req *requestmedia.ListRequest
 		if !rec.ApprovedAt.IsZero() {
 			info.ApprovedAt = rec.ApprovedAt.Format(time.RFC3339)
 		}
+		if detail, label := applyHistoryStatusFields(rec, snap); detail != "" || label != "" {
+			info.StatusDetail = detail
+			info.StatusLabel = label
+		}
 		out.Requests = append(out.Requests, info)
 	}
 	return out, nil
+}
+
+func needsHistoryStatusFields(list []*requestRecord) bool {
+	for _, rec := range list {
+		if rec != nil && isInProgressRequestStatus(rec.Status) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Module) ApproveRequest(ctx context.Context, req *requestmedia.ApproveRequestRequest) (*requestmedia.ApproveRequestResponse, error) {
@@ -308,6 +345,8 @@ func (m *Module) ApproveRequest(ctx context.Context, req *requestmedia.ApproveRe
 	}
 	itemID, status, err := m.fulfillRequest(ctx, fulfillParams{
 		RequestID: rec.ID, ItemType: rec.ItemType, TMDBID: rec.TMDBID,
+		MusicBrainzID: rec.MusicBrainzID, ReleaseGroupID: rec.ReleaseGroupID,
+		RecordingID: rec.RecordingID, ArtistName: rec.ArtistName, AlbumTitle: rec.AlbumTitle,
 		Title: rec.Title, Year: rec.Year, Overview: rec.Overview, Poster: rec.Poster,
 		RequestedBy: rec.RequestedBy, ApprovedBy: approvedBy, TenantID: rec.TenantID,
 		PreserveCreate: rec.CreatedAt,

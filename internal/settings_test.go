@@ -8,8 +8,8 @@ func TestSettingsPreferWorkflow(t *testing.T) {
 		t.Fatal("default prefer_workflow should be true")
 	}
 	defs := m.Settings()
-	if len(defs) != 2 {
-		t.Fatalf("defs len=%d want 2", len(defs))
+	if len(defs) != 4 {
+		t.Fatalf("defs len=%d want 4", len(defs))
 	}
 	if err := m.UpdateSetting("prefer_workflow", "false"); err != nil {
 		t.Fatal(err)

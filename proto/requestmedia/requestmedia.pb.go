@@ -333,6 +333,486 @@ func (x *RequestTVResponse) GetStatus() string {
 	return ""
 }
 
+type RequestMusicRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MusicbrainzId string                 `protobuf:"bytes,1,opt,name=musicbrainz_id,json=musicbrainzId,proto3" json:"musicbrainz_id,omitempty"`
+	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Overview      string                 `protobuf:"bytes,3,opt,name=overview,proto3" json:"overview,omitempty"`
+	Poster        string                 `protobuf:"bytes,4,opt,name=poster,proto3" json:"poster,omitempty"`
+	RequestedBy   string                 `protobuf:"bytes,5,opt,name=requested_by,json=requestedBy,proto3" json:"requested_by,omitempty"`
+	IsAdmin       bool                   `protobuf:"varint,6,opt,name=is_admin,json=isAdmin,proto3" json:"is_admin,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestMusicRequest) Reset() {
+	*x = RequestMusicRequest{}
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestMusicRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestMusicRequest) ProtoMessage() {}
+
+func (x *RequestMusicRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestMusicRequest.ProtoReflect.Descriptor instead.
+func (*RequestMusicRequest) Descriptor() ([]byte, []int) {
+	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *RequestMusicRequest) GetMusicbrainzId() string {
+	if x != nil {
+		return x.MusicbrainzId
+	}
+	return ""
+}
+
+func (x *RequestMusicRequest) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *RequestMusicRequest) GetOverview() string {
+	if x != nil {
+		return x.Overview
+	}
+	return ""
+}
+
+func (x *RequestMusicRequest) GetPoster() string {
+	if x != nil {
+		return x.Poster
+	}
+	return ""
+}
+
+func (x *RequestMusicRequest) GetRequestedBy() string {
+	if x != nil {
+		return x.RequestedBy
+	}
+	return ""
+}
+
+func (x *RequestMusicRequest) GetIsAdmin() bool {
+	if x != nil {
+		return x.IsAdmin
+	}
+	return false
+}
+
+type RequestMusicResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ArtistId      string                 `protobuf:"bytes,2,opt,name=artist_id,json=artistId,proto3" json:"artist_id,omitempty"`
+	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestMusicResponse) Reset() {
+	*x = RequestMusicResponse{}
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestMusicResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestMusicResponse) ProtoMessage() {}
+
+func (x *RequestMusicResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestMusicResponse.ProtoReflect.Descriptor instead.
+func (*RequestMusicResponse) Descriptor() ([]byte, []int) {
+	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RequestMusicResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *RequestMusicResponse) GetArtistId() string {
+	if x != nil {
+		return x.ArtistId
+	}
+	return ""
+}
+
+func (x *RequestMusicResponse) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+type RequestAlbumRequest struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	ReleaseGroupId      string                 `protobuf:"bytes,1,opt,name=release_group_id,json=releaseGroupId,proto3" json:"release_group_id,omitempty"`
+	ArtistMusicbrainzId string                 `protobuf:"bytes,2,opt,name=artist_musicbrainz_id,json=artistMusicbrainzId,proto3" json:"artist_musicbrainz_id,omitempty"`
+	ArtistName          string                 `protobuf:"bytes,3,opt,name=artist_name,json=artistName,proto3" json:"artist_name,omitempty"`
+	Title               string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
+	Year                int32                  `protobuf:"varint,5,opt,name=year,proto3" json:"year,omitempty"`
+	Overview            string                 `protobuf:"bytes,6,opt,name=overview,proto3" json:"overview,omitempty"`
+	RequestedBy         string                 `protobuf:"bytes,7,opt,name=requested_by,json=requestedBy,proto3" json:"requested_by,omitempty"`
+	IsAdmin             bool                   `protobuf:"varint,8,opt,name=is_admin,json=isAdmin,proto3" json:"is_admin,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *RequestAlbumRequest) Reset() {
+	*x = RequestAlbumRequest{}
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestAlbumRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestAlbumRequest) ProtoMessage() {}
+
+func (x *RequestAlbumRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestAlbumRequest.ProtoReflect.Descriptor instead.
+func (*RequestAlbumRequest) Descriptor() ([]byte, []int) {
+	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *RequestAlbumRequest) GetReleaseGroupId() string {
+	if x != nil {
+		return x.ReleaseGroupId
+	}
+	return ""
+}
+
+func (x *RequestAlbumRequest) GetArtistMusicbrainzId() string {
+	if x != nil {
+		return x.ArtistMusicbrainzId
+	}
+	return ""
+}
+
+func (x *RequestAlbumRequest) GetArtistName() string {
+	if x != nil {
+		return x.ArtistName
+	}
+	return ""
+}
+
+func (x *RequestAlbumRequest) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *RequestAlbumRequest) GetYear() int32 {
+	if x != nil {
+		return x.Year
+	}
+	return 0
+}
+
+func (x *RequestAlbumRequest) GetOverview() string {
+	if x != nil {
+		return x.Overview
+	}
+	return ""
+}
+
+func (x *RequestAlbumRequest) GetRequestedBy() string {
+	if x != nil {
+		return x.RequestedBy
+	}
+	return ""
+}
+
+func (x *RequestAlbumRequest) GetIsAdmin() bool {
+	if x != nil {
+		return x.IsAdmin
+	}
+	return false
+}
+
+type RequestAlbumResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	AlbumId       string                 `protobuf:"bytes,2,opt,name=album_id,json=albumId,proto3" json:"album_id,omitempty"`
+	ArtistId      string                 `protobuf:"bytes,3,opt,name=artist_id,json=artistId,proto3" json:"artist_id,omitempty"`
+	Status        string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestAlbumResponse) Reset() {
+	*x = RequestAlbumResponse{}
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestAlbumResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestAlbumResponse) ProtoMessage() {}
+
+func (x *RequestAlbumResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestAlbumResponse.ProtoReflect.Descriptor instead.
+func (*RequestAlbumResponse) Descriptor() ([]byte, []int) {
+	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RequestAlbumResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *RequestAlbumResponse) GetAlbumId() string {
+	if x != nil {
+		return x.AlbumId
+	}
+	return ""
+}
+
+func (x *RequestAlbumResponse) GetArtistId() string {
+	if x != nil {
+		return x.ArtistId
+	}
+	return ""
+}
+
+func (x *RequestAlbumResponse) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+type RequestTrackRequest struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	RecordingId         string                 `protobuf:"bytes,1,opt,name=recording_id,json=recordingId,proto3" json:"recording_id,omitempty"`
+	ReleaseGroupId      string                 `protobuf:"bytes,2,opt,name=release_group_id,json=releaseGroupId,proto3" json:"release_group_id,omitempty"`
+	ArtistMusicbrainzId string                 `protobuf:"bytes,3,opt,name=artist_musicbrainz_id,json=artistMusicbrainzId,proto3" json:"artist_musicbrainz_id,omitempty"`
+	ArtistName          string                 `protobuf:"bytes,4,opt,name=artist_name,json=artistName,proto3" json:"artist_name,omitempty"`
+	Title               string                 `protobuf:"bytes,5,opt,name=title,proto3" json:"title,omitempty"`
+	AlbumTitle          string                 `protobuf:"bytes,6,opt,name=album_title,json=albumTitle,proto3" json:"album_title,omitempty"`
+	RequestedBy         string                 `protobuf:"bytes,7,opt,name=requested_by,json=requestedBy,proto3" json:"requested_by,omitempty"`
+	IsAdmin             bool                   `protobuf:"varint,8,opt,name=is_admin,json=isAdmin,proto3" json:"is_admin,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *RequestTrackRequest) Reset() {
+	*x = RequestTrackRequest{}
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestTrackRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestTrackRequest) ProtoMessage() {}
+
+func (x *RequestTrackRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestTrackRequest.ProtoReflect.Descriptor instead.
+func (*RequestTrackRequest) Descriptor() ([]byte, []int) {
+	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *RequestTrackRequest) GetRecordingId() string {
+	if x != nil {
+		return x.RecordingId
+	}
+	return ""
+}
+
+func (x *RequestTrackRequest) GetReleaseGroupId() string {
+	if x != nil {
+		return x.ReleaseGroupId
+	}
+	return ""
+}
+
+func (x *RequestTrackRequest) GetArtistMusicbrainzId() string {
+	if x != nil {
+		return x.ArtistMusicbrainzId
+	}
+	return ""
+}
+
+func (x *RequestTrackRequest) GetArtistName() string {
+	if x != nil {
+		return x.ArtistName
+	}
+	return ""
+}
+
+func (x *RequestTrackRequest) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *RequestTrackRequest) GetAlbumTitle() string {
+	if x != nil {
+		return x.AlbumTitle
+	}
+	return ""
+}
+
+func (x *RequestTrackRequest) GetRequestedBy() string {
+	if x != nil {
+		return x.RequestedBy
+	}
+	return ""
+}
+
+func (x *RequestTrackRequest) GetIsAdmin() bool {
+	if x != nil {
+		return x.IsAdmin
+	}
+	return false
+}
+
+type RequestTrackResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	AlbumId       string                 `protobuf:"bytes,2,opt,name=album_id,json=albumId,proto3" json:"album_id,omitempty"`
+	ArtistId      string                 `protobuf:"bytes,3,opt,name=artist_id,json=artistId,proto3" json:"artist_id,omitempty"`
+	Status        string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestTrackResponse) Reset() {
+	*x = RequestTrackResponse{}
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestTrackResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestTrackResponse) ProtoMessage() {}
+
+func (x *RequestTrackResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestTrackResponse.ProtoReflect.Descriptor instead.
+func (*RequestTrackResponse) Descriptor() ([]byte, []int) {
+	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *RequestTrackResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *RequestTrackResponse) GetAlbumId() string {
+	if x != nil {
+		return x.AlbumId
+	}
+	return ""
+}
+
+func (x *RequestTrackResponse) GetArtistId() string {
+	if x != nil {
+		return x.ArtistId
+	}
+	return ""
+}
+
+func (x *RequestTrackResponse) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
 type GetStatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
@@ -342,7 +822,7 @@ type GetStatusRequest struct {
 
 func (x *GetStatusRequest) Reset() {
 	*x = GetStatusRequest{}
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[4]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -354,7 +834,7 @@ func (x *GetStatusRequest) String() string {
 func (*GetStatusRequest) ProtoMessage() {}
 
 func (x *GetStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[4]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -367,7 +847,7 @@ func (x *GetStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetStatusRequest) Descriptor() ([]byte, []int) {
-	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{4}
+	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetStatusRequest) GetRequestId() string {
@@ -390,13 +870,15 @@ type GetStatusResponse struct {
 	RequestedBy   string                 `protobuf:"bytes,9,opt,name=requested_by,json=requestedBy,proto3" json:"requested_by,omitempty"`
 	ApprovedBy    string                 `protobuf:"bytes,10,opt,name=approved_by,json=approvedBy,proto3" json:"approved_by,omitempty"`
 	ApprovedAt    string                 `protobuf:"bytes,11,opt,name=approved_at,json=approvedAt,proto3" json:"approved_at,omitempty"`
+	StatusDetail  string                 `protobuf:"bytes,12,opt,name=status_detail,json=statusDetail,proto3" json:"status_detail,omitempty"` // from automation history when in progress
+	StatusLabel   string                 `protobuf:"bytes,13,opt,name=status_label,json=statusLabel,proto3" json:"status_label,omitempty"`    // human-readable label from automation history
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetStatusResponse) Reset() {
 	*x = GetStatusResponse{}
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[5]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -408,7 +890,7 @@ func (x *GetStatusResponse) String() string {
 func (*GetStatusResponse) ProtoMessage() {}
 
 func (x *GetStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[5]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -421,7 +903,7 @@ func (x *GetStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetStatusResponse) Descriptor() ([]byte, []int) {
-	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{5}
+	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetStatusResponse) GetRequestId() string {
@@ -501,6 +983,20 @@ func (x *GetStatusResponse) GetApprovedAt() string {
 	return ""
 }
 
+func (x *GetStatusResponse) GetStatusDetail() string {
+	if x != nil {
+		return x.StatusDetail
+	}
+	return ""
+}
+
+func (x *GetStatusResponse) GetStatusLabel() string {
+	if x != nil {
+		return x.StatusLabel
+	}
+	return ""
+}
+
 type ListRequestsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"` // optional filter; empty = all
@@ -510,7 +1006,7 @@ type ListRequestsRequest struct {
 
 func (x *ListRequestsRequest) Reset() {
 	*x = ListRequestsRequest{}
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[6]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -522,7 +1018,7 @@ func (x *ListRequestsRequest) String() string {
 func (*ListRequestsRequest) ProtoMessage() {}
 
 func (x *ListRequestsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[6]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -535,7 +1031,7 @@ func (x *ListRequestsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRequestsRequest.ProtoReflect.Descriptor instead.
 func (*ListRequestsRequest) Descriptor() ([]byte, []int) {
-	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{6}
+	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ListRequestsRequest) GetStatus() string {
@@ -560,13 +1056,15 @@ type RequestInfo struct {
 	ApprovedBy    string                 `protobuf:"bytes,11,opt,name=approved_by,json=approvedBy,proto3" json:"approved_by,omitempty"`
 	ApprovedAt    string                 `protobuf:"bytes,12,opt,name=approved_at,json=approvedAt,proto3" json:"approved_at,omitempty"`
 	Poster        string                 `protobuf:"bytes,13,opt,name=poster,proto3" json:"poster,omitempty"`
+	StatusDetail  string                 `protobuf:"bytes,14,opt,name=status_detail,json=statusDetail,proto3" json:"status_detail,omitempty"` // from automation history when in progress
+	StatusLabel   string                 `protobuf:"bytes,15,opt,name=status_label,json=statusLabel,proto3" json:"status_label,omitempty"`    // human-readable label from automation history
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RequestInfo) Reset() {
 	*x = RequestInfo{}
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[7]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -578,7 +1076,7 @@ func (x *RequestInfo) String() string {
 func (*RequestInfo) ProtoMessage() {}
 
 func (x *RequestInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[7]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -591,7 +1089,7 @@ func (x *RequestInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestInfo.ProtoReflect.Descriptor instead.
 func (*RequestInfo) Descriptor() ([]byte, []int) {
-	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{7}
+	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RequestInfo) GetRequestId() string {
@@ -685,6 +1183,20 @@ func (x *RequestInfo) GetPoster() string {
 	return ""
 }
 
+func (x *RequestInfo) GetStatusDetail() string {
+	if x != nil {
+		return x.StatusDetail
+	}
+	return ""
+}
+
+func (x *RequestInfo) GetStatusLabel() string {
+	if x != nil {
+		return x.StatusLabel
+	}
+	return ""
+}
+
 type ListRequestsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Requests      []*RequestInfo         `protobuf:"bytes,1,rep,name=requests,proto3" json:"requests,omitempty"`
@@ -694,7 +1206,7 @@ type ListRequestsResponse struct {
 
 func (x *ListRequestsResponse) Reset() {
 	*x = ListRequestsResponse{}
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[8]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -706,7 +1218,7 @@ func (x *ListRequestsResponse) String() string {
 func (*ListRequestsResponse) ProtoMessage() {}
 
 func (x *ListRequestsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[8]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -719,7 +1231,7 @@ func (x *ListRequestsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRequestsResponse.ProtoReflect.Descriptor instead.
 func (*ListRequestsResponse) Descriptor() ([]byte, []int) {
-	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{8}
+	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ListRequestsResponse) GetRequests() []*RequestInfo {
@@ -739,7 +1251,7 @@ type ApproveRequestRequest struct {
 
 func (x *ApproveRequestRequest) Reset() {
 	*x = ApproveRequestRequest{}
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[9]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -751,7 +1263,7 @@ func (x *ApproveRequestRequest) String() string {
 func (*ApproveRequestRequest) ProtoMessage() {}
 
 func (x *ApproveRequestRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[9]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -764,7 +1276,7 @@ func (x *ApproveRequestRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveRequestRequest.ProtoReflect.Descriptor instead.
 func (*ApproveRequestRequest) Descriptor() ([]byte, []int) {
-	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{9}
+	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ApproveRequestRequest) GetRequestId() string {
@@ -793,7 +1305,7 @@ type ApproveRequestResponse struct {
 
 func (x *ApproveRequestResponse) Reset() {
 	*x = ApproveRequestResponse{}
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[10]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -805,7 +1317,7 @@ func (x *ApproveRequestResponse) String() string {
 func (*ApproveRequestResponse) ProtoMessage() {}
 
 func (x *ApproveRequestResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[10]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -818,7 +1330,7 @@ func (x *ApproveRequestResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveRequestResponse.ProtoReflect.Descriptor instead.
 func (*ApproveRequestResponse) Descriptor() ([]byte, []int) {
-	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{10}
+	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ApproveRequestResponse) GetRequestId() string {
@@ -859,7 +1371,7 @@ type DenyRequestRequest struct {
 
 func (x *DenyRequestRequest) Reset() {
 	*x = DenyRequestRequest{}
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[11]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -871,7 +1383,7 @@ func (x *DenyRequestRequest) String() string {
 func (*DenyRequestRequest) ProtoMessage() {}
 
 func (x *DenyRequestRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[11]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -884,7 +1396,7 @@ func (x *DenyRequestRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DenyRequestRequest.ProtoReflect.Descriptor instead.
 func (*DenyRequestRequest) Descriptor() ([]byte, []int) {
-	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{11}
+	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DenyRequestRequest) GetRequestId() string {
@@ -912,7 +1424,7 @@ type DenyRequestResponse struct {
 
 func (x *DenyRequestResponse) Reset() {
 	*x = DenyRequestResponse{}
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[12]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -924,7 +1436,7 @@ func (x *DenyRequestResponse) String() string {
 func (*DenyRequestResponse) ProtoMessage() {}
 
 func (x *DenyRequestResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_requestmedia_requestmedia_proto_msgTypes[12]
+	mi := &file_requestmedia_requestmedia_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -937,7 +1449,7 @@ func (x *DenyRequestResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DenyRequestResponse.ProtoReflect.Descriptor instead.
 func (*DenyRequestResponse) Descriptor() ([]byte, []int) {
-	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{12}
+	return file_requestmedia_requestmedia_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *DenyRequestResponse) GetRequestId() string {
@@ -992,10 +1504,55 @@ const file_requestmedia_requestmedia_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
 	"\tseries_id\x18\x02 \x01(\tR\bseriesId\x12\x16\n" +
-	"\x06status\x18\x03 \x01(\tR\x06status\"1\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\"\xc4\x01\n" +
+	"\x13RequestMusicRequest\x12%\n" +
+	"\x0emusicbrainz_id\x18\x01 \x01(\tR\rmusicbrainzId\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12\x1a\n" +
+	"\boverview\x18\x03 \x01(\tR\boverview\x12\x16\n" +
+	"\x06poster\x18\x04 \x01(\tR\x06poster\x12!\n" +
+	"\frequested_by\x18\x05 \x01(\tR\vrequestedBy\x12\x19\n" +
+	"\bis_admin\x18\x06 \x01(\bR\aisAdmin\"j\n" +
+	"\x14RequestMusicResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
+	"\tartist_id\x18\x02 \x01(\tR\bartistId\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\"\x98\x02\n" +
+	"\x13RequestAlbumRequest\x12(\n" +
+	"\x10release_group_id\x18\x01 \x01(\tR\x0ereleaseGroupId\x122\n" +
+	"\x15artist_musicbrainz_id\x18\x02 \x01(\tR\x13artistMusicbrainzId\x12\x1f\n" +
+	"\vartist_name\x18\x03 \x01(\tR\n" +
+	"artistName\x12\x14\n" +
+	"\x05title\x18\x04 \x01(\tR\x05title\x12\x12\n" +
+	"\x04year\x18\x05 \x01(\x05R\x04year\x12\x1a\n" +
+	"\boverview\x18\x06 \x01(\tR\boverview\x12!\n" +
+	"\frequested_by\x18\a \x01(\tR\vrequestedBy\x12\x19\n" +
+	"\bis_admin\x18\b \x01(\bR\aisAdmin\"\x85\x01\n" +
+	"\x14RequestAlbumResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
+	"\balbum_id\x18\x02 \x01(\tR\aalbumId\x12\x1b\n" +
+	"\tartist_id\x18\x03 \x01(\tR\bartistId\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\"\xac\x02\n" +
+	"\x13RequestTrackRequest\x12!\n" +
+	"\frecording_id\x18\x01 \x01(\tR\vrecordingId\x12(\n" +
+	"\x10release_group_id\x18\x02 \x01(\tR\x0ereleaseGroupId\x122\n" +
+	"\x15artist_musicbrainz_id\x18\x03 \x01(\tR\x13artistMusicbrainzId\x12\x1f\n" +
+	"\vartist_name\x18\x04 \x01(\tR\n" +
+	"artistName\x12\x14\n" +
+	"\x05title\x18\x05 \x01(\tR\x05title\x12\x1f\n" +
+	"\valbum_title\x18\x06 \x01(\tR\n" +
+	"albumTitle\x12!\n" +
+	"\frequested_by\x18\a \x01(\tR\vrequestedBy\x12\x19\n" +
+	"\bis_admin\x18\b \x01(\bR\aisAdmin\"\x85\x01\n" +
+	"\x14RequestTrackResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
+	"\balbum_id\x18\x02 \x01(\tR\aalbumId\x12\x1b\n" +
+	"\tartist_id\x18\x03 \x01(\tR\bartistId\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\"1\n" +
 	"\x10GetStatusRequest\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\"\xcd\x02\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\"\x95\x03\n" +
 	"\x11GetStatusResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
@@ -1013,9 +1570,11 @@ const file_requestmedia_requestmedia_proto_rawDesc = "" +
 	" \x01(\tR\n" +
 	"approvedBy\x12\x1f\n" +
 	"\vapproved_at\x18\v \x01(\tR\n" +
-	"approvedAt\"-\n" +
+	"approvedAt\x12#\n" +
+	"\rstatus_detail\x18\f \x01(\tR\fstatusDetail\x12!\n" +
+	"\fstatus_label\x18\r \x01(\tR\vstatusLabel\"-\n" +
 	"\x13ListRequestsRequest\x12\x16\n" +
-	"\x06status\x18\x01 \x01(\tR\x06status\"\xf8\x02\n" +
+	"\x06status\x18\x01 \x01(\tR\x06status\"\xc0\x03\n" +
 	"\vRequestInfo\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
@@ -1035,7 +1594,9 @@ const file_requestmedia_requestmedia_proto_rawDesc = "" +
 	"approvedBy\x12\x1f\n" +
 	"\vapproved_at\x18\f \x01(\tR\n" +
 	"approvedAt\x12\x16\n" +
-	"\x06poster\x18\r \x01(\tR\x06poster\"Y\n" +
+	"\x06poster\x18\r \x01(\tR\x06poster\x12#\n" +
+	"\rstatus_detail\x18\x0e \x01(\tR\fstatusDetail\x12!\n" +
+	"\fstatus_label\x18\x0f \x01(\tR\vstatusLabel\"Y\n" +
 	"\x14ListRequestsResponse\x12A\n" +
 	"\brequests\x18\x01 \x03(\v2%.muxcore.media.request.v1.RequestInfoR\brequests\"W\n" +
 	"\x15ApproveRequestRequest\x12\x1d\n" +
@@ -1057,10 +1618,13 @@ const file_requestmedia_requestmedia_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error2\x9b\x05\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error2\xe8\a\n" +
 	"\x0eRequestService\x12m\n" +
 	"\fRequestMovie\x12-.muxcore.media.request.v1.RequestMovieRequest\x1a..muxcore.media.request.v1.RequestMovieResponse\x12d\n" +
-	"\tRequestTV\x12*.muxcore.media.request.v1.RequestTVRequest\x1a+.muxcore.media.request.v1.RequestTVResponse\x12d\n" +
+	"\tRequestTV\x12*.muxcore.media.request.v1.RequestTVRequest\x1a+.muxcore.media.request.v1.RequestTVResponse\x12m\n" +
+	"\fRequestMusic\x12-.muxcore.media.request.v1.RequestMusicRequest\x1a..muxcore.media.request.v1.RequestMusicResponse\x12m\n" +
+	"\fRequestAlbum\x12-.muxcore.media.request.v1.RequestAlbumRequest\x1a..muxcore.media.request.v1.RequestAlbumResponse\x12m\n" +
+	"\fRequestTrack\x12-.muxcore.media.request.v1.RequestTrackRequest\x1a..muxcore.media.request.v1.RequestTrackResponse\x12d\n" +
 	"\tGetStatus\x12*.muxcore.media.request.v1.GetStatusRequest\x1a+.muxcore.media.request.v1.GetStatusResponse\x12m\n" +
 	"\fListRequests\x12-.muxcore.media.request.v1.ListRequestsRequest\x1a..muxcore.media.request.v1.ListRequestsResponse\x12s\n" +
 	"\x0eApproveRequest\x12/.muxcore.media.request.v1.ApproveRequestRequest\x1a0.muxcore.media.request.v1.ApproveRequestResponse\x12j\n" +
@@ -1078,38 +1642,50 @@ func file_requestmedia_requestmedia_proto_rawDescGZIP() []byte {
 	return file_requestmedia_requestmedia_proto_rawDescData
 }
 
-var file_requestmedia_requestmedia_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_requestmedia_requestmedia_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_requestmedia_requestmedia_proto_goTypes = []any{
 	(*RequestMovieRequest)(nil),    // 0: muxcore.media.request.v1.RequestMovieRequest
 	(*RequestMovieResponse)(nil),   // 1: muxcore.media.request.v1.RequestMovieResponse
 	(*RequestTVRequest)(nil),       // 2: muxcore.media.request.v1.RequestTVRequest
 	(*RequestTVResponse)(nil),      // 3: muxcore.media.request.v1.RequestTVResponse
-	(*GetStatusRequest)(nil),       // 4: muxcore.media.request.v1.GetStatusRequest
-	(*GetStatusResponse)(nil),      // 5: muxcore.media.request.v1.GetStatusResponse
-	(*ListRequestsRequest)(nil),    // 6: muxcore.media.request.v1.ListRequestsRequest
-	(*RequestInfo)(nil),            // 7: muxcore.media.request.v1.RequestInfo
-	(*ListRequestsResponse)(nil),   // 8: muxcore.media.request.v1.ListRequestsResponse
-	(*ApproveRequestRequest)(nil),  // 9: muxcore.media.request.v1.ApproveRequestRequest
-	(*ApproveRequestResponse)(nil), // 10: muxcore.media.request.v1.ApproveRequestResponse
-	(*DenyRequestRequest)(nil),     // 11: muxcore.media.request.v1.DenyRequestRequest
-	(*DenyRequestResponse)(nil),    // 12: muxcore.media.request.v1.DenyRequestResponse
+	(*RequestMusicRequest)(nil),    // 4: muxcore.media.request.v1.RequestMusicRequest
+	(*RequestMusicResponse)(nil),   // 5: muxcore.media.request.v1.RequestMusicResponse
+	(*RequestAlbumRequest)(nil),    // 6: muxcore.media.request.v1.RequestAlbumRequest
+	(*RequestAlbumResponse)(nil),   // 7: muxcore.media.request.v1.RequestAlbumResponse
+	(*RequestTrackRequest)(nil),    // 8: muxcore.media.request.v1.RequestTrackRequest
+	(*RequestTrackResponse)(nil),   // 9: muxcore.media.request.v1.RequestTrackResponse
+	(*GetStatusRequest)(nil),       // 10: muxcore.media.request.v1.GetStatusRequest
+	(*GetStatusResponse)(nil),      // 11: muxcore.media.request.v1.GetStatusResponse
+	(*ListRequestsRequest)(nil),    // 12: muxcore.media.request.v1.ListRequestsRequest
+	(*RequestInfo)(nil),            // 13: muxcore.media.request.v1.RequestInfo
+	(*ListRequestsResponse)(nil),   // 14: muxcore.media.request.v1.ListRequestsResponse
+	(*ApproveRequestRequest)(nil),  // 15: muxcore.media.request.v1.ApproveRequestRequest
+	(*ApproveRequestResponse)(nil), // 16: muxcore.media.request.v1.ApproveRequestResponse
+	(*DenyRequestRequest)(nil),     // 17: muxcore.media.request.v1.DenyRequestRequest
+	(*DenyRequestResponse)(nil),    // 18: muxcore.media.request.v1.DenyRequestResponse
 }
 var file_requestmedia_requestmedia_proto_depIdxs = []int32{
-	7,  // 0: muxcore.media.request.v1.ListRequestsResponse.requests:type_name -> muxcore.media.request.v1.RequestInfo
+	13, // 0: muxcore.media.request.v1.ListRequestsResponse.requests:type_name -> muxcore.media.request.v1.RequestInfo
 	0,  // 1: muxcore.media.request.v1.RequestService.RequestMovie:input_type -> muxcore.media.request.v1.RequestMovieRequest
 	2,  // 2: muxcore.media.request.v1.RequestService.RequestTV:input_type -> muxcore.media.request.v1.RequestTVRequest
-	4,  // 3: muxcore.media.request.v1.RequestService.GetStatus:input_type -> muxcore.media.request.v1.GetStatusRequest
-	6,  // 4: muxcore.media.request.v1.RequestService.ListRequests:input_type -> muxcore.media.request.v1.ListRequestsRequest
-	9,  // 5: muxcore.media.request.v1.RequestService.ApproveRequest:input_type -> muxcore.media.request.v1.ApproveRequestRequest
-	11, // 6: muxcore.media.request.v1.RequestService.DenyRequest:input_type -> muxcore.media.request.v1.DenyRequestRequest
-	1,  // 7: muxcore.media.request.v1.RequestService.RequestMovie:output_type -> muxcore.media.request.v1.RequestMovieResponse
-	3,  // 8: muxcore.media.request.v1.RequestService.RequestTV:output_type -> muxcore.media.request.v1.RequestTVResponse
-	5,  // 9: muxcore.media.request.v1.RequestService.GetStatus:output_type -> muxcore.media.request.v1.GetStatusResponse
-	8,  // 10: muxcore.media.request.v1.RequestService.ListRequests:output_type -> muxcore.media.request.v1.ListRequestsResponse
-	10, // 11: muxcore.media.request.v1.RequestService.ApproveRequest:output_type -> muxcore.media.request.v1.ApproveRequestResponse
-	12, // 12: muxcore.media.request.v1.RequestService.DenyRequest:output_type -> muxcore.media.request.v1.DenyRequestResponse
-	7,  // [7:13] is the sub-list for method output_type
-	1,  // [1:7] is the sub-list for method input_type
+	4,  // 3: muxcore.media.request.v1.RequestService.RequestMusic:input_type -> muxcore.media.request.v1.RequestMusicRequest
+	6,  // 4: muxcore.media.request.v1.RequestService.RequestAlbum:input_type -> muxcore.media.request.v1.RequestAlbumRequest
+	8,  // 5: muxcore.media.request.v1.RequestService.RequestTrack:input_type -> muxcore.media.request.v1.RequestTrackRequest
+	10, // 6: muxcore.media.request.v1.RequestService.GetStatus:input_type -> muxcore.media.request.v1.GetStatusRequest
+	12, // 7: muxcore.media.request.v1.RequestService.ListRequests:input_type -> muxcore.media.request.v1.ListRequestsRequest
+	15, // 8: muxcore.media.request.v1.RequestService.ApproveRequest:input_type -> muxcore.media.request.v1.ApproveRequestRequest
+	17, // 9: muxcore.media.request.v1.RequestService.DenyRequest:input_type -> muxcore.media.request.v1.DenyRequestRequest
+	1,  // 10: muxcore.media.request.v1.RequestService.RequestMovie:output_type -> muxcore.media.request.v1.RequestMovieResponse
+	3,  // 11: muxcore.media.request.v1.RequestService.RequestTV:output_type -> muxcore.media.request.v1.RequestTVResponse
+	5,  // 12: muxcore.media.request.v1.RequestService.RequestMusic:output_type -> muxcore.media.request.v1.RequestMusicResponse
+	7,  // 13: muxcore.media.request.v1.RequestService.RequestAlbum:output_type -> muxcore.media.request.v1.RequestAlbumResponse
+	9,  // 14: muxcore.media.request.v1.RequestService.RequestTrack:output_type -> muxcore.media.request.v1.RequestTrackResponse
+	11, // 15: muxcore.media.request.v1.RequestService.GetStatus:output_type -> muxcore.media.request.v1.GetStatusResponse
+	14, // 16: muxcore.media.request.v1.RequestService.ListRequests:output_type -> muxcore.media.request.v1.ListRequestsResponse
+	16, // 17: muxcore.media.request.v1.RequestService.ApproveRequest:output_type -> muxcore.media.request.v1.ApproveRequestResponse
+	18, // 18: muxcore.media.request.v1.RequestService.DenyRequest:output_type -> muxcore.media.request.v1.DenyRequestResponse
+	10, // [10:19] is the sub-list for method output_type
+	1,  // [1:10] is the sub-list for method input_type
 	1,  // [1:1] is the sub-list for extension type_name
 	1,  // [1:1] is the sub-list for extension extendee
 	0,  // [0:1] is the sub-list for field type_name
@@ -1126,7 +1702,7 @@ func file_requestmedia_requestmedia_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_requestmedia_requestmedia_proto_rawDesc), len(file_requestmedia_requestmedia_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

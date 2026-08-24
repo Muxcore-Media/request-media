@@ -33,7 +33,25 @@ func (m *Module) settingsDefs() []contracts.SettingDef {
 			Type:        contracts.SettingTypeBool,
 			Value:       strconv.FormatBool(m.getRequireApproval()),
 			Default:     "false",
-			Description: "When true, all new requests start as pending until approved (REQUEST_REQUIRE_APPROVAL). Non-admin requestors always need approval.",
+			Description: "When true, all new requests start as pending until approved (REQUEST_REQUIRE_APPROVAL). Non-privileged requestors need approval when false.",
+			Group:       "Approval",
+		},
+		{
+			Key:         "allowed_request_roles",
+			Label:       "Allowed Request Roles",
+			Type:        contracts.SettingTypeString,
+			Value:       m.getAllowedRequestRolesCSV(),
+			Default:     defaultAllowedRequestRoles,
+			Description: "Comma-separated roles that may submit requests (REQUEST_ALLOWED_ROLES). Default: admin,manager,user — viewers excluded.",
+			Group:       "Approval",
+		},
+		{
+			Key:         "manager_auto_approve",
+			Label:       "Manager Auto-Approve",
+			Type:        contracts.SettingTypeBool,
+			Value:       strconv.FormatBool(m.getManagerAutoApprove()),
+			Default:     "true",
+			Description: "When true, manager role skips approval queue like admin (REQUEST_MANAGER_AUTO_APPROVE).",
 			Group:       "Approval",
 		},
 	}
@@ -60,6 +78,24 @@ func (m *Module) updateSetting(key, value string) error {
 		m.requireApproval = v
 		m.cfgMu.Unlock()
 		return nil
+	case "allowed_request_roles", "REQUEST_ALLOWED_ROLES":
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return fmt.Errorf("allowed_request_roles cannot be empty")
+		}
+		m.cfgMu.Lock()
+		m.allowedRequestRoles = value
+		m.cfgMu.Unlock()
+		return nil
+	case "manager_auto_approve", "REQUEST_MANAGER_AUTO_APPROVE":
+		v, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid manager_auto_approve %q (true/false)", value)
+		}
+		m.cfgMu.Lock()
+		m.managerAutoApprove = v
+		m.cfgMu.Unlock()
+		return nil
 	default:
 		return fmt.Errorf("unknown setting %q", key)
 	}
@@ -69,4 +105,9 @@ func (m *Module) getPreferWorkflow() bool {
 	m.cfgMu.RLock()
 	defer m.cfgMu.RUnlock()
 	return m.preferWorkflow
+}
+
+func (m *Module) getAllowedRequestRolesCSV() string {
+	roles := m.getAllowedRequestRoles()
+	return strings.Join(roles, ",")
 }

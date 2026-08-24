@@ -8,25 +8,28 @@ import (
 
 	"google.golang.org/grpc"
 
-	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
+	automationv1 "github.com/Muxcore-Media/contracts-automation/muxcore/automation/v1"
 	mgmntv1 "github.com/Muxcore-Media/media-movies/proto/mgmntv1"
 	requestmedia "github.com/Muxcore-Media/request-media/proto/requestmedia"
 )
 
 func TestNeedsApproval(t *testing.T) {
 	m := NewModule(Config{})
-	if m.needsApproval("", false) {
+	if m.needsApproval("", nil) {
 		t.Fatal("empty requestor with require=false should not need approval")
 	}
-	if m.needsApproval("alice", true) {
+	if m.needsApproval("alice", []string{"admin"}) {
 		t.Fatal("admin should not need approval when require=false")
 	}
-	if !m.needsApproval("alice", false) {
-		t.Fatal("non-admin should need approval")
+	if !m.needsApproval("alice", []string{"user"}) {
+		t.Fatal("non-privileged user should need approval")
+	}
+	if m.needsApproval("bob", []string{"manager"}) {
+		t.Fatal("manager should auto-approve by default")
 	}
 	trueVal := true
 	m2 := NewModule(Config{RequireApproval: &trueVal})
-	if !m2.needsApproval("", true) {
+	if !m2.needsApproval("", []string{"admin"}) {
 		t.Fatal("require_approval=true should always need approval")
 	}
 }

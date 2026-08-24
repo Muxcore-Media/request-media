@@ -5,6 +5,9 @@ option go_package = "github.com/Muxcore-Media/request-media/proto/requestmedia;r
 service RequestService {
   rpc RequestMovie(RequestMovieRequest) returns (RequestMovieResponse);
   rpc RequestTV(RequestTVRequest) returns (RequestTVResponse);
+  rpc RequestMusic(RequestMusicRequest) returns (RequestMusicResponse);
+  rpc RequestAlbum(RequestAlbumRequest) returns (RequestAlbumResponse);
+  rpc RequestTrack(RequestTrackRequest) returns (RequestTrackResponse);
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
   rpc ListRequests(ListRequestsRequest) returns (ListRequestsResponse);
   rpc ApproveRequest(ApproveRequestRequest) returns (ApproveRequestResponse);
@@ -44,6 +47,57 @@ message RequestTVResponse {
   string status = 3;
 }
 
+message RequestMusicRequest {
+  string musicbrainz_id = 1;
+  string title = 2;
+  string overview = 3;
+  string poster = 4;
+  string requested_by = 5;
+  bool is_admin = 6;
+}
+
+message RequestMusicResponse {
+  string request_id = 1;
+  string artist_id = 2;
+  string status = 3;
+}
+
+message RequestAlbumRequest {
+  string release_group_id = 1;
+  string artist_musicbrainz_id = 2;
+  string artist_name = 3;
+  string title = 4;
+  int32 year = 5;
+  string overview = 6;
+  string requested_by = 7;
+  bool is_admin = 8;
+}
+
+message RequestAlbumResponse {
+  string request_id = 1;
+  string album_id = 2;
+  string artist_id = 3;
+  string status = 4;
+}
+
+message RequestTrackRequest {
+  string recording_id = 1;
+  string release_group_id = 2;
+  string artist_musicbrainz_id = 3;
+  string artist_name = 4;
+  string title = 5;
+  string album_title = 6;
+  string requested_by = 7;
+  bool is_admin = 8;
+}
+
+message RequestTrackResponse {
+  string request_id = 1;
+  string album_id = 2;
+  string artist_id = 3;
+  string status = 4;
+}
+
 message GetStatusRequest {
   string request_id = 1;
 }
@@ -60,6 +114,8 @@ message GetStatusResponse {
   string requested_by = 9;
   string approved_by = 10;
   string approved_at = 11;
+  string status_detail = 12; // from automation history when in progress
+  string status_label = 13; // human-readable label from automation history
 }
 
 message ListRequestsRequest {
@@ -80,6 +136,8 @@ message RequestInfo {
   string approved_by = 11;
   string approved_at = 12;
   string poster = 13;
+  string status_detail = 14; // from automation history when in progress
+  string status_label = 15; // human-readable label from automation history
 }
 
 message ListRequestsResponse {

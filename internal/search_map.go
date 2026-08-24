@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	metadatav1 "github.com/Muxcore-Media/metadata-tmdb/proto/metadatav1"
+	metadatav1 "github.com/Muxcore-Media/contracts-metadata/muxcore/metadata/v1"
 )
 
 func searchTypeFromQuery(raw string) metadatav1.MediaType {
@@ -16,6 +16,41 @@ func searchTypeFromQuery(raw string) metadatav1.MediaType {
 	default:
 		return metadatav1.MediaType_MEDIA_TYPE_UNSPECIFIED
 	}
+}
+
+func isMusicRequest(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "music", "artist", "music_artist":
+		return true
+	default:
+		return false
+	}
+}
+
+func isMusicAlbumSearch(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "music_album", "album":
+		return true
+	default:
+		return false
+	}
+}
+
+func isMusicAlbumRequest(raw string) bool {
+	return isMusicAlbumSearch(raw)
+}
+
+func isMusicTrackSearch(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "music_track", "track", "recording", "song":
+		return true
+	default:
+		return false
+	}
+}
+
+func isMusicTrackRequest(raw string) bool {
+	return isMusicTrackSearch(raw)
 }
 
 func isTVRequest(raw string) bool {

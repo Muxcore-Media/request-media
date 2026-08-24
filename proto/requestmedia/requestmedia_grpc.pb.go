@@ -21,6 +21,9 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	RequestService_RequestMovie_FullMethodName   = "/muxcore.media.request.v1.RequestService/RequestMovie"
 	RequestService_RequestTV_FullMethodName      = "/muxcore.media.request.v1.RequestService/RequestTV"
+	RequestService_RequestMusic_FullMethodName   = "/muxcore.media.request.v1.RequestService/RequestMusic"
+	RequestService_RequestAlbum_FullMethodName   = "/muxcore.media.request.v1.RequestService/RequestAlbum"
+	RequestService_RequestTrack_FullMethodName   = "/muxcore.media.request.v1.RequestService/RequestTrack"
 	RequestService_GetStatus_FullMethodName      = "/muxcore.media.request.v1.RequestService/GetStatus"
 	RequestService_ListRequests_FullMethodName   = "/muxcore.media.request.v1.RequestService/ListRequests"
 	RequestService_ApproveRequest_FullMethodName = "/muxcore.media.request.v1.RequestService/ApproveRequest"
@@ -33,6 +36,9 @@ const (
 type RequestServiceClient interface {
 	RequestMovie(ctx context.Context, in *RequestMovieRequest, opts ...grpc.CallOption) (*RequestMovieResponse, error)
 	RequestTV(ctx context.Context, in *RequestTVRequest, opts ...grpc.CallOption) (*RequestTVResponse, error)
+	RequestMusic(ctx context.Context, in *RequestMusicRequest, opts ...grpc.CallOption) (*RequestMusicResponse, error)
+	RequestAlbum(ctx context.Context, in *RequestAlbumRequest, opts ...grpc.CallOption) (*RequestAlbumResponse, error)
+	RequestTrack(ctx context.Context, in *RequestTrackRequest, opts ...grpc.CallOption) (*RequestTrackResponse, error)
 	GetStatus(ctx context.Context, in *GetStatusRequest, opts ...grpc.CallOption) (*GetStatusResponse, error)
 	ListRequests(ctx context.Context, in *ListRequestsRequest, opts ...grpc.CallOption) (*ListRequestsResponse, error)
 	ApproveRequest(ctx context.Context, in *ApproveRequestRequest, opts ...grpc.CallOption) (*ApproveRequestResponse, error)
@@ -61,6 +67,36 @@ func (c *requestServiceClient) RequestTV(ctx context.Context, in *RequestTVReque
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RequestTVResponse)
 	err := c.cc.Invoke(ctx, RequestService_RequestTV_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *requestServiceClient) RequestMusic(ctx context.Context, in *RequestMusicRequest, opts ...grpc.CallOption) (*RequestMusicResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestMusicResponse)
+	err := c.cc.Invoke(ctx, RequestService_RequestMusic_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *requestServiceClient) RequestAlbum(ctx context.Context, in *RequestAlbumRequest, opts ...grpc.CallOption) (*RequestAlbumResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestAlbumResponse)
+	err := c.cc.Invoke(ctx, RequestService_RequestAlbum_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *requestServiceClient) RequestTrack(ctx context.Context, in *RequestTrackRequest, opts ...grpc.CallOption) (*RequestTrackResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestTrackResponse)
+	err := c.cc.Invoke(ctx, RequestService_RequestTrack_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -113,6 +149,9 @@ func (c *requestServiceClient) DenyRequest(ctx context.Context, in *DenyRequestR
 type RequestServiceServer interface {
 	RequestMovie(context.Context, *RequestMovieRequest) (*RequestMovieResponse, error)
 	RequestTV(context.Context, *RequestTVRequest) (*RequestTVResponse, error)
+	RequestMusic(context.Context, *RequestMusicRequest) (*RequestMusicResponse, error)
+	RequestAlbum(context.Context, *RequestAlbumRequest) (*RequestAlbumResponse, error)
+	RequestTrack(context.Context, *RequestTrackRequest) (*RequestTrackResponse, error)
 	GetStatus(context.Context, *GetStatusRequest) (*GetStatusResponse, error)
 	ListRequests(context.Context, *ListRequestsRequest) (*ListRequestsResponse, error)
 	ApproveRequest(context.Context, *ApproveRequestRequest) (*ApproveRequestResponse, error)
@@ -132,6 +171,15 @@ func (UnimplementedRequestServiceServer) RequestMovie(context.Context, *RequestM
 }
 func (UnimplementedRequestServiceServer) RequestTV(context.Context, *RequestTVRequest) (*RequestTVResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RequestTV not implemented")
+}
+func (UnimplementedRequestServiceServer) RequestMusic(context.Context, *RequestMusicRequest) (*RequestMusicResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RequestMusic not implemented")
+}
+func (UnimplementedRequestServiceServer) RequestAlbum(context.Context, *RequestAlbumRequest) (*RequestAlbumResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RequestAlbum not implemented")
+}
+func (UnimplementedRequestServiceServer) RequestTrack(context.Context, *RequestTrackRequest) (*RequestTrackResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RequestTrack not implemented")
 }
 func (UnimplementedRequestServiceServer) GetStatus(context.Context, *GetStatusRequest) (*GetStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetStatus not implemented")
@@ -198,6 +246,60 @@ func _RequestService_RequestTV_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RequestServiceServer).RequestTV(ctx, req.(*RequestTVRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RequestService_RequestMusic_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestMusicRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RequestServiceServer).RequestMusic(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RequestService_RequestMusic_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RequestServiceServer).RequestMusic(ctx, req.(*RequestMusicRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RequestService_RequestAlbum_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestAlbumRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RequestServiceServer).RequestAlbum(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RequestService_RequestAlbum_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RequestServiceServer).RequestAlbum(ctx, req.(*RequestAlbumRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RequestService_RequestTrack_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestTrackRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RequestServiceServer).RequestTrack(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RequestService_RequestTrack_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RequestServiceServer).RequestTrack(ctx, req.(*RequestTrackRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -288,6 +390,18 @@ var RequestService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RequestTV",
 			Handler:    _RequestService_RequestTV_Handler,
+		},
+		{
+			MethodName: "RequestMusic",
+			Handler:    _RequestService_RequestMusic_Handler,
+		},
+		{
+			MethodName: "RequestAlbum",
+			Handler:    _RequestService_RequestAlbum_Handler,
+		},
+		{
+			MethodName: "RequestTrack",
+			Handler:    _RequestService_RequestTrack_Handler,
 		},
 		{
 			MethodName: "GetStatus",
