@@ -8,9 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	"github.com/Muxcore-Media/core/pkg/tenant"
 	mgmntv1 "github.com/Muxcore-Media/media-movies/proto/mgmntv1"
@@ -55,12 +52,18 @@ type fulfillParams struct {
 	Genres         []string
 	Poster         string
 	Backdrop       string
-	SeasonNumber   int32
-	EpisodeNumber  int32
-	RequestedBy    string
-	ApprovedBy     string
-	TenantID       string
-	PreserveCreate time.Time
+	SeasonNumber     int32
+	EpisodeNumber    int32
+	QualityProfileID string
+	ISBN             string
+	Publisher        string
+	ComicVineID      string
+	Narrator         string
+	ASIN             string
+	RequestedBy      string
+	ApprovedBy       string
+	TenantID         string
+	PreserveCreate   time.Time
 }
 
 func (m *Module) fulfillRequest(ctx context.Context, p fulfillParams) (itemID, status string, err error) {
@@ -75,6 +78,14 @@ func (m *Module) fulfillRequest(ctx context.Context, p fulfillParams) (itemID, s
 	case "music_track":
 		albumID, _, status, err := m.fulfillMusicTrack(ctx, p)
 		return albumID, status, err
+	case "book":
+		bookID, _, status, err := m.fulfillBook(ctx, p)
+		return bookID, status, err
+	case "comic":
+		return m.fulfillComic(ctx, p)
+	case "audiobook":
+		audiobookID, _, status, err := m.fulfillAudiobook(ctx, p)
+		return audiobookID, status, err
 	default:
 		return m.fulfillMovie(ctx, p)
 	}
@@ -86,6 +97,7 @@ func (m *Module) fulfillMovie(ctx context.Context, p fulfillParams) (string, str
 			ID: p.RequestID, ItemType: "movie", ItemID: itemID, TMDBID: p.TMDBID,
 			Title: p.Title, Year: p.Year, Overview: p.Overview, Poster: p.Poster, Status: status,
 			RequestedBy: p.RequestedBy, ApprovedBy: p.ApprovedBy, TenantID: p.TenantID,
+			QualityProfileID: p.QualityProfileID,
 		}
 		if !p.PreserveCreate.IsZero() {
 			rec.CreatedAt = p.PreserveCreate
@@ -109,6 +121,7 @@ func (m *Module) fulfillMovie(ctx context.Context, p fulfillParams) (string, str
 			m.tryQueueForAcquisition(ctx, queueParams{
 				ItemType: "movie", ItemID: fmt.Sprintf("tmdb_%d", p.TMDBID),
 				TmdbID: p.TMDBID, Title: p.Title, Year: p.Year,
+				QualityProfileID: p.QualityProfileID,
 			})
 			return "", "workflow", nil
 		}
@@ -124,11 +137,12 @@ func (m *Module) fulfillMovie(ctx context.Context, p fulfillParams) (string, str
 		m.tryQueueForAcquisition(ctx, queueParams{
 			ItemType: "movie", ItemID: fmt.Sprintf("tmdb_%d", p.TMDBID),
 			TmdbID: p.TMDBID, Title: p.Title, Year: p.Year,
+			QualityProfileID: p.QualityProfileID,
 		})
 		return "", "requested", nil
 	}
 
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := dialModuleGRPC(addr)
 	if err != nil {
 		return "", "", fmt.Errorf("dial media-movies: %w", err)
 	}
@@ -158,6 +172,7 @@ func (m *Module) fulfillMovie(ctx context.Context, p fulfillParams) (string, str
 	m.tryQueueForAcquisition(ctx, queueParams{
 		ItemType: "movie", ItemID: movieID,
 		TmdbID: p.TMDBID, Title: p.Title, Year: p.Year,
+		QualityProfileID: p.QualityProfileID,
 	})
 	slog.Info("movie requested", "title", p.Title, "tmdb_id", p.TMDBID, "movie_id", movieID)
 	return movieID, "added", nil
@@ -169,6 +184,8 @@ func (m *Module) fulfillTV(ctx context.Context, p fulfillParams) (string, string
 			ID: p.RequestID, ItemType: "tv", ItemID: itemID, TMDBID: p.TMDBID,
 			Title: p.Title, Year: p.Year, Overview: p.Overview, Poster: p.Poster, Status: status,
 			RequestedBy: p.RequestedBy, ApprovedBy: p.ApprovedBy, TenantID: p.TenantID,
+			SeasonNumber: p.SeasonNumber, EpisodeNumber: p.EpisodeNumber,
+			QualityProfileID: p.QualityProfileID,
 		}
 		if !p.PreserveCreate.IsZero() {
 			rec.CreatedAt = p.PreserveCreate
@@ -197,6 +214,7 @@ func (m *Module) fulfillTV(ctx context.Context, p fulfillParams) (string, string
 				ItemType: "tv", ItemID: fmt.Sprintf("tmdb_%d", p.TMDBID),
 				TmdbID: p.TMDBID, Title: p.Title, Year: p.Year,
 				SeasonNumber: p.SeasonNumber, EpisodeNumber: p.EpisodeNumber,
+				QualityProfileID: p.QualityProfileID,
 			})
 			return "", "workflow", nil
 		}
@@ -214,12 +232,13 @@ func (m *Module) fulfillTV(ctx context.Context, p fulfillParams) (string, string
 			ItemType: "tv", ItemID: fmt.Sprintf("tmdb_%d", p.TMDBID),
 			TmdbID: p.TMDBID, Title: p.Title, Year: p.Year,
 			SeasonNumber: p.SeasonNumber, EpisodeNumber: p.EpisodeNumber,
+			QualityProfileID: p.QualityProfileID,
 		})
 		slog.Info("tv requested", "title", p.Title, "tmdb_id", p.TMDBID)
 		return "", "requested", nil
 	}
 
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := dialModuleGRPC(addr)
 	if err != nil {
 		return "", "", fmt.Errorf("dial media-tvshows: %w", err)
 	}
@@ -251,6 +270,7 @@ func (m *Module) fulfillTV(ctx context.Context, p fulfillParams) (string, string
 		ItemType: "tv", ItemID: seriesID,
 		TmdbID: p.TMDBID, Title: p.Title, Year: p.Year,
 		SeasonNumber: p.SeasonNumber, EpisodeNumber: p.EpisodeNumber,
+		QualityProfileID: p.QualityProfileID,
 	})
 	slog.Info("tv requested", "title", p.Title, "tmdb_id", p.TMDBID, "series_id", seriesID)
 	return seriesID, "added", nil
@@ -316,6 +336,9 @@ func needsHistoryStatusFields(list []*requestRecord) bool {
 }
 
 func (m *Module) ApproveRequest(ctx context.Context, req *requestmedia.ApproveRequestRequest) (*requestmedia.ApproveRequestResponse, error) {
+	if err := requireApproveRoles(ctx); err != nil {
+		return nil, err
+	}
 	id := strings.TrimSpace(req.GetRequestId())
 	if id == "" {
 		return &requestmedia.ApproveRequestResponse{Error: "request_id is required"}, nil
@@ -348,6 +371,8 @@ func (m *Module) ApproveRequest(ctx context.Context, req *requestmedia.ApproveRe
 		MusicBrainzID: rec.MusicBrainzID, ReleaseGroupID: rec.ReleaseGroupID,
 		RecordingID: rec.RecordingID, ArtistName: rec.ArtistName, AlbumTitle: rec.AlbumTitle,
 		Title: rec.Title, Year: rec.Year, Overview: rec.Overview, Poster: rec.Poster,
+		SeasonNumber: rec.SeasonNumber, EpisodeNumber: rec.EpisodeNumber,
+		QualityProfileID: rec.QualityProfileID,
 		RequestedBy: rec.RequestedBy, ApprovedBy: approvedBy, TenantID: rec.TenantID,
 		PreserveCreate: rec.CreatedAt,
 	})
@@ -367,6 +392,9 @@ func (m *Module) ApproveRequest(ctx context.Context, req *requestmedia.ApproveRe
 }
 
 func (m *Module) DenyRequest(ctx context.Context, req *requestmedia.DenyRequestRequest) (*requestmedia.DenyRequestResponse, error) {
+	if err := requireApproveRoles(ctx); err != nil {
+		return nil, err
+	}
 	id := strings.TrimSpace(req.GetRequestId())
 	if id == "" {
 		return &requestmedia.DenyRequestResponse{Error: "request_id is required"}, nil

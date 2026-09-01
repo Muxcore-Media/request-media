@@ -27,9 +27,10 @@ type discoverDetail struct {
 	Backdrop  string           `json:"backdrop"`
 	VoteAvg   float64          `json:"voteAvg"`
 	Runtime   int32            `json:"runtime,omitempty"`
-	Status    string           `json:"status,omitempty"`
-	MediaType string           `json:"mediaType"`
-	Trailer   *discoverTrailer `json:"trailer,omitempty"`
+	Status        string           `json:"status,omitempty"`
+	MediaType     string           `json:"mediaType"`
+	RequestStatus string           `json:"requestStatus,omitempty"`
+	Trailer       *discoverTrailer `json:"trailer,omitempty"`
 }
 
 func (m *Module) handleDiscover(w http.ResponseWriter, r *http.Request) {
@@ -39,9 +40,12 @@ func (m *Module) handleDiscover(w http.ResponseWriter, r *http.Request) {
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/discover/")
 	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) == 3 {
-		if m.handleDiscoverBrowse(w, r, parts) {
-			return
+	if len(parts) == 2 {
+		switch strings.ToLower(parts[0]) {
+		case "trending", "popular":
+			if m.handleDiscoverBrowse(w, r, parts) {
+				return
+			}
 		}
 	}
 	if len(parts) != 2 {
@@ -65,27 +69,28 @@ func (m *Module) handleDiscover(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := handlerContext(r)
 	defer cancel()
 
+	tenantID := m.resolveTenant(r.Context(), r.Header)
 	switch kind {
 	case "movie", "movies":
 		resp, err := client.GetMovieDetails(ctx, &metadatav1.GetMovieDetailsRequest{
-			TmdbId:           int32(id),
+			Id:               int32(id),
 			AppendToResponse: []string{"videos"},
 		})
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, mapMovieDiscover(resp))
+		writeJSON(w, http.StatusOK, m.overlayDiscoverDetail(r.Context(), tenantID, mapMovieDiscover(resp)))
 	case "tv", "series", "show", "shows":
 		resp, err := client.GetTVDetails(ctx, &metadatav1.GetTVDetailsRequest{
-			TmdbId:           int32(id),
+			Id:               int32(id),
 			AppendToResponse: []string{"videos"},
 		})
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, mapTVDiscover(resp))
+		writeJSON(w, http.StatusOK, m.overlayDiscoverDetail(r.Context(), tenantID, mapTVDiscover(resp)))
 	default:
 		http.NotFound(w, r)
 	}

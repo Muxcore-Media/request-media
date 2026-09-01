@@ -8,7 +8,7 @@ MuxCore sidecar module (`request-media`). Workspace deploy and SSH: [`../AGENTS.
 |-------|-------|
 | Directory | `request-media` |
 | Capabilities | see muxcore.json |
-| Contracts | none declared |
+| Contracts | local `RequestService` (`proto/requestmedia/requestmedia.proto`) |
 
 ## Agent rules
 
@@ -22,5 +22,5 @@ MuxCore sidecar module (`request-media`). Workspace deploy and SSH: [`../AGENTS.
 
 ```bash
 cd request-media
-go test ./...
+nix-shell -p go --run 'go test ./...'
 ```

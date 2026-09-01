@@ -6,9 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
 	musicbrainzv1 "github.com/Muxcore-Media/metadata-musicbrainz/proto/musicbrainzv1"
 )
 
@@ -17,7 +14,7 @@ func (m *Module) musicBrainzClient(ctx context.Context) (musicbrainzv1.MusicBrai
 	if err != nil {
 		return nil, nil, err
 	}
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := dialModuleGRPC(addr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -45,7 +42,8 @@ func (m *Module) handleMusicSearch(w http.ResponseWriter, r *http.Request, q str
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"results": mapMusicArtistSearchResults(q, resp.GetArtists()),
+		"results": m.overlaySearchResults(r.Context(), m.resolveTenant(r.Context(), r.Header),
+			mapMusicArtistSearchResults(q, resp.GetArtists())),
 	})
 }
 
@@ -70,7 +68,8 @@ func (m *Module) handleMusicAlbumSearch(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"results": mapMusicAlbumSearchResults(q, resp.GetReleaseGroups()),
+		"results": m.overlaySearchResults(r.Context(), m.resolveTenant(r.Context(), r.Header),
+			mapMusicAlbumSearchResults(q, resp.GetReleaseGroups())),
 	})
 }
 
@@ -95,7 +94,8 @@ func (m *Module) handleMusicTrackSearch(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"results": mapMusicTrackSearchResults(q, resp.GetRecordings()),
+		"results": m.overlaySearchResults(r.Context(), m.resolveTenant(r.Context(), r.Header),
+			mapMusicTrackSearchResults(q, resp.GetRecordings())),
 	})
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +18,8 @@ import (
 
 func testModule(t *testing.T) *Module {
 	t.Helper()
+	t.Setenv("REQUEST_ALLOW_ANONYMOUS", "true")
+	t.Setenv("MUXCORE_INSECURE_DISABLE_TLS", "true")
 	m := NewModule(Config{
 		ID:       "request-media-test",
 		GRPCAddr: "127.0.0.1:0",
@@ -183,6 +186,10 @@ func (s *stubMovies) RefreshMetadata(ctx context.Context, req *mgmntv1.RefreshMe
 	return &mgmntv1.RefreshMetadataResponse{}, nil
 }
 
+func (s *stubMovies) ListMovies(ctx context.Context, req *mgmntv1.ListMoviesRequest) (*mgmntv1.ListMoviesResponse, error) {
+	return &mgmntv1.ListMoviesResponse{}, nil
+}
+
 type stubTV struct {
 	tvmgmtv1.UnimplementedTvManagementServiceServer
 	last *tvmgmtv1.AddTVShowRequest
@@ -193,16 +200,24 @@ func (s *stubTV) AddTVShow(ctx context.Context, req *tvmgmtv1.AddTVShowRequest) 
 	return &tvmgmtv1.AddTVShowResponse{SeriesId: "series-1"}, nil
 }
 
+func (s *stubTV) ListTVShows(ctx context.Context, req *tvmgmtv1.ListTVShowsRequest) (*tvmgmtv1.ListTVShowsResponse, error) {
+	return &tvmgmtv1.ListTVShowsResponse{}, nil
+}
+
 type stubAutomation struct {
 	automationv1.UnimplementedAutomationServiceServer
-	last  *automationv1.AddToQueueRequest
+	last  atomic.Pointer[automationv1.AddToQueueRequest]
 	queue []*automationv1.QueueItem
 	hist  []*automationv1.DownloadRecord
 }
 
 func (s *stubAutomation) AddToQueue(ctx context.Context, req *automationv1.AddToQueueRequest) (*automationv1.AddToQueueResponse, error) {
-	s.last = req
+	s.last.Store(req)
 	return &automationv1.AddToQueueResponse{QueueId: "q-1"}, nil
+}
+
+func (s *stubAutomation) lastAdd() *automationv1.AddToQueueRequest {
+	return s.last.Load()
 }
 
 func (s *stubAutomation) GetQueue(ctx context.Context, req *automationv1.GetQueueRequest) (*automationv1.GetQueueResponse, error) {
@@ -335,15 +350,15 @@ func TestRequestMovie_QueuesAutomationAfterAdd(t *testing.T) {
 		t.Fatalf("status = %q, want added", resp.GetStatus())
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for autoStub.last == nil && time.Now().Before(deadline) {
+	for autoStub.lastAdd() == nil && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if autoStub.last == nil {
+	if autoStub.lastAdd() == nil {
 		t.Fatal("AddToQueue not called")
 	}
-	if autoStub.last.GetItemType() != "movie" || autoStub.last.GetItemId() != "movie-1" ||
-		autoStub.last.GetTmdbId() != 550 || autoStub.last.GetTitle() != "Fight Club" {
-		t.Fatalf("AddToQueue = %+v", autoStub.last)
+	if autoStub.lastAdd().GetItemType() != "movie" || autoStub.lastAdd().GetItemId() != "movie-1" ||
+		autoStub.lastAdd().GetTmdbId() != 550 || autoStub.lastAdd().GetTitle() != "Fight Club" {
+		t.Fatalf("AddToQueue = %+v", autoStub.lastAdd())
 	}
 }
 
@@ -392,14 +407,14 @@ func TestRequestMovie_QueuesAutomationWhenLibraryUnavailable(t *testing.T) {
 		t.Fatalf("status = %q, want requested", resp.GetStatus())
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for autoStub.last == nil && time.Now().Before(deadline) {
+	for autoStub.lastAdd() == nil && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if autoStub.last == nil {
+	if autoStub.lastAdd() == nil {
 		t.Fatal("AddToQueue not called")
 	}
-	if autoStub.last.GetItemId() != "tmdb_218" || autoStub.last.GetItemType() != "movie" {
-		t.Fatalf("AddToQueue = %+v", autoStub.last)
+	if autoStub.lastAdd().GetItemId() != "tmdb_218" || autoStub.lastAdd().GetItemType() != "movie" {
+		t.Fatalf("AddToQueue = %+v", autoStub.lastAdd())
 	}
 }
 
@@ -435,16 +450,16 @@ func TestRequestTV_QueuesAutomationAfterAdd(t *testing.T) {
 		t.Fatalf("resp = %+v", resp)
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for autoStub.last == nil && time.Now().Before(deadline) {
+	for autoStub.lastAdd() == nil && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if autoStub.last == nil {
+	if autoStub.lastAdd() == nil {
 		t.Fatal("AddToQueue not called")
 	}
-	if autoStub.last.GetItemType() != "tv" || autoStub.last.GetItemId() != "series-1" ||
-		autoStub.last.GetTmdbId() != 1396 || autoStub.last.GetSeasonNumber() != 1 ||
-		autoStub.last.GetEpisodeNumber() != 1 {
-		t.Fatalf("AddToQueue = %+v", autoStub.last)
+	if autoStub.lastAdd().GetItemType() != "tv" || autoStub.lastAdd().GetItemId() != "series-1" ||
+		autoStub.lastAdd().GetTmdbId() != 1396 || autoStub.lastAdd().GetSeasonNumber() != 1 ||
+		autoStub.lastAdd().GetEpisodeNumber() != 1 {
+		t.Fatalf("AddToQueue = %+v", autoStub.lastAdd())
 	}
 }
 
@@ -480,13 +495,13 @@ func TestRequestTV_SeasonZeroDummyQueuesPack(t *testing.T) {
 		t.Fatalf("resp = %+v", resp)
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for autoStub.last == nil && time.Now().Before(deadline) {
+	for autoStub.lastAdd() == nil && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if autoStub.last == nil {
+	if autoStub.lastAdd() == nil {
 		t.Fatal("AddToQueue not called")
 	}
-	if autoStub.last.GetSeasonNumber() != 0 || autoStub.last.GetEpisodeNumber() != 0 {
-		t.Fatalf("expected pack grain 0/0, got S%02dE%02d", autoStub.last.GetSeasonNumber(), autoStub.last.GetEpisodeNumber())
+	if autoStub.lastAdd().GetSeasonNumber() != 0 || autoStub.lastAdd().GetEpisodeNumber() != 0 {
+		t.Fatalf("expected pack grain 0/0, got S%02dE%02d", autoStub.lastAdd().GetSeasonNumber(), autoStub.lastAdd().GetEpisodeNumber())
 	}
 }

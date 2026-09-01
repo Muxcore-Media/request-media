@@ -62,6 +62,33 @@ func isTVRequest(raw string) bool {
 	}
 }
 
+func isBookRequest(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "book", "books":
+		return true
+	default:
+		return false
+	}
+}
+
+func isComicRequest(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "comic", "comics":
+		return true
+	default:
+		return false
+	}
+}
+
+func isAudiobookRequest(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "audiobook", "audiobooks":
+		return true
+	default:
+		return false
+	}
+}
+
 func mapSearchResults(query string, reqType metadatav1.MediaType, results []*metadatav1.SearchResult) []searchResult {
 	out := make([]searchResult, 0, len(results))
 	for _, r := range results {

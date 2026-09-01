@@ -5,9 +5,6 @@ import (
 	"log/slog"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
 	mgmntv1 "github.com/Muxcore-Media/media-movies/proto/mgmntv1"
 	tvmgmtv1 "github.com/Muxcore-Media/media-tvshows/proto/tvmgmtv1"
 )
@@ -24,7 +21,7 @@ func (m *Module) scheduleMovieMetadataRefresh(movieID string, tmdbID int32) {
 			slog.Warn("request-media: movie metadata refresh skipped", "movie_id", movieID, "error", err)
 			return
 		}
-		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := dialModuleGRPC(addr)
 		if err != nil {
 			slog.Warn("request-media: dial media-movies for metadata refresh", "movie_id", movieID, "error", err)
 			return
@@ -49,7 +46,7 @@ func (m *Module) scheduleTVMetadataRefresh(seriesID string, tmdbID int32) {
 			slog.Warn("request-media: tv metadata refresh skipped", "series_id", seriesID, "error", err)
 			return
 		}
-		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := dialModuleGRPC(addr)
 		if err != nil {
 			slog.Warn("request-media: dial media-tvshows for metadata refresh", "series_id", seriesID, "error", err)
 			return

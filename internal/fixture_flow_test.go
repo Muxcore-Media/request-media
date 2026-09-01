@@ -60,8 +60,8 @@ func (fixtureMetadata) Search(_ context.Context, req *metadatav1.SearchRequest) 
 }
 
 func (fixtureMetadata) GetMovieDetails(_ context.Context, req *metadatav1.GetMovieDetailsRequest) (*metadatav1.GetMovieDetailsResponse, error) {
-	if req.GetTmdbId() != 550 {
-		return nil, status.Errorf(codes.NotFound, "fixture movie %d", req.GetTmdbId())
+	if req.GetId() != 550 {
+		return nil, status.Errorf(codes.NotFound, "fixture movie %d", req.GetId())
 	}
 	return &metadatav1.GetMovieDetailsResponse{
 		Id: 550, Title: "Fight Club", ReleaseDate: "1999-10-15", Runtime: 139, ImdbId: "tt0137523",
@@ -69,8 +69,8 @@ func (fixtureMetadata) GetMovieDetails(_ context.Context, req *metadatav1.GetMov
 }
 
 func (fixtureMetadata) GetTVDetails(_ context.Context, req *metadatav1.GetTVDetailsRequest) (*metadatav1.GetTVDetailsResponse, error) {
-	if req.GetTmdbId() != 1396 {
-		return nil, status.Errorf(codes.NotFound, "fixture tv %d", req.GetTmdbId())
+	if req.GetId() != 1396 {
+		return nil, status.Errorf(codes.NotFound, "fixture tv %d", req.GetId())
 	}
 	return &metadatav1.GetTVDetailsResponse{
 		Id: 1396, Name: "Breaking Bad", FirstAirDate: "2008-01-20", NumberOfSeasons: 5, NumberOfEpisodes: 62,

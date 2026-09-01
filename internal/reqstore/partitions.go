@@ -135,6 +135,38 @@ func (p *Partitions) LoadAll() (map[string]*Record, error) {
 	return out, nil
 }
 
+// Delete removes a request from the tenant's partition DB.
+func (p *Partitions) Delete(id, tenantID string) error {
+	if id == "" {
+		return fmt.Errorf("id is required")
+	}
+	st, err := p.ForTenant(tenantID)
+	if err != nil {
+		return err
+	}
+	return st.Delete(id)
+}
+
+// Ping verifies every open partition database is reachable.
+func (p *Partitions) Ping() error {
+	p.mu.Lock()
+	keys := make([]string, 0, len(p.byKey))
+	for k := range p.byKey {
+		keys = append(keys, k)
+	}
+	p.mu.Unlock()
+	for _, k := range keys {
+		st, err := p.ForTenant(k)
+		if err != nil {
+			return err
+		}
+		if err := st.Ping(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Close closes all open tenant databases.
 func (p *Partitions) Close() error {
 	p.mu.Lock()

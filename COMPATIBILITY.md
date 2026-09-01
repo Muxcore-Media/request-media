@@ -4,9 +4,9 @@
 
 | Module Version | Core Version | Status |
 |----------------|-------------|--------|
-| v0.2.0           | 0.4.0+     | Current |
+| v0.3.0           | 0.4.0+     | Current |
 
-MVP host stacks pin **core@v0.5.0**. This module declares `minCoreVersion` **0.4.0**.
+MVP host stacks pin **core@v0.5.x**. This module declares `minCoreVersion` **0.4.0**.
 
 ## Capabilities
 
@@ -14,7 +14,7 @@ MVP host stacks pin **core@v0.5.0**. This module declares `minCoreVersion` **0.4
 
 ## Contracts
 
-No external contract package — `RequestService` gRPC + HTTP JSON UI/API.
+Local `RequestService` gRPC (`proto/requestmedia/requestmedia.proto`) plus HTTP JSON routes documented in `README.md`.
 
 ## Breaking Changes
 

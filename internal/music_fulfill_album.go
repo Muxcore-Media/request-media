@@ -12,6 +12,12 @@ import (
 )
 
 func (m *Module) RequestAlbum(ctx context.Context, req *requestmedia.RequestAlbumRequest) (*requestmedia.RequestAlbumResponse, error) {
+	if err := m.requireRequestRoles(ctx); err != nil {
+		return nil, err
+	}
+	ctx = incomingContextWithUser(ctx, req.GetRequestedBy())
+	requestedBy := requestedByFromContext(ctx, req.GetRequestedBy())
+	roles := rolesFromContext(ctx)
 	tenantID := m.resolveTenant(ctx, nil)
 	rgID := strings.TrimSpace(req.GetReleaseGroupId())
 	if existing := m.findExistingMusicAlbum(rgID, req.GetTitle(), tenantID); existing != nil {
@@ -20,9 +26,8 @@ func (m *Module) RequestAlbum(ctx context.Context, req *requestmedia.RequestAlbu
 		}, nil
 	}
 	requestID := fmt.Sprintf("req_malb_%d", time.Now().UnixNano())
-	requestedBy := strings.TrimSpace(req.GetRequestedBy())
 
-	if m.needsApproval(requestedBy, rolesFromIsAdmin(req.GetIsAdmin())) {
+	if m.needsApproval(requestedBy, roles) {
 		m.saveRequest(&requestRecord{
 			ID: requestID, ItemType: "music_album", Title: req.GetTitle(), Year: req.GetYear(),
 			Overview: req.GetOverview(), Status: "pending", RequestedBy: requestedBy, TenantID: tenantID,
@@ -47,6 +52,12 @@ func (m *Module) RequestAlbum(ctx context.Context, req *requestmedia.RequestAlbu
 }
 
 func (m *Module) RequestTrack(ctx context.Context, req *requestmedia.RequestTrackRequest) (*requestmedia.RequestTrackResponse, error) {
+	if err := m.requireRequestRoles(ctx); err != nil {
+		return nil, err
+	}
+	ctx = incomingContextWithUser(ctx, req.GetRequestedBy())
+	requestedBy := requestedByFromContext(ctx, req.GetRequestedBy())
+	roles := rolesFromContext(ctx)
 	tenantID := m.resolveTenant(ctx, nil)
 	recID := strings.TrimSpace(req.GetRecordingId())
 	if existing := m.findExistingMusicTrack(recID, req.GetTitle(), tenantID); existing != nil {
@@ -55,9 +66,8 @@ func (m *Module) RequestTrack(ctx context.Context, req *requestmedia.RequestTrac
 		}, nil
 	}
 	requestID := fmt.Sprintf("req_mtrk_%d", time.Now().UnixNano())
-	requestedBy := strings.TrimSpace(req.GetRequestedBy())
 
-	if m.needsApproval(requestedBy, rolesFromIsAdmin(req.GetIsAdmin())) {
+	if m.needsApproval(requestedBy, roles) {
 		m.saveRequest(&requestRecord{
 			ID: requestID, ItemType: "music_track", Title: req.GetTitle(), Status: "pending",
 			RequestedBy: requestedBy, TenantID: tenantID, RecordingID: recID,

@@ -8,10 +8,14 @@ service RequestService {
   rpc RequestMusic(RequestMusicRequest) returns (RequestMusicResponse);
   rpc RequestAlbum(RequestAlbumRequest) returns (RequestAlbumResponse);
   rpc RequestTrack(RequestTrackRequest) returns (RequestTrackResponse);
+  rpc RequestBook(RequestBookRequest) returns (RequestBookResponse);
+  rpc RequestComic(RequestComicRequest) returns (RequestComicResponse);
+  rpc RequestAudiobook(RequestAudiobookRequest) returns (RequestAudiobookResponse);
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
   rpc ListRequests(ListRequestsRequest) returns (ListRequestsResponse);
   rpc ApproveRequest(ApproveRequestRequest) returns (ApproveRequestResponse);
   rpc DenyRequest(DenyRequestRequest) returns (DenyRequestResponse);
+  rpc CancelRequest(CancelRequestRequest) returns (CancelRequestResponse);
 }
 
 message RequestMovieRequest {
@@ -22,6 +26,7 @@ message RequestMovieRequest {
   repeated string genres = 5;
   string requested_by = 6;
   bool is_admin = 7;
+  string quality_profile_id = 8;
 }
 
 message RequestMovieResponse {
@@ -39,6 +44,7 @@ message RequestTVRequest {
   string overview = 6;
   string requested_by = 7;
   bool is_admin = 8;
+  string quality_profile_id = 9;
 }
 
 message RequestTVResponse {
@@ -95,6 +101,53 @@ message RequestTrackResponse {
   string request_id = 1;
   string album_id = 2;
   string artist_id = 3;
+  string status = 4;
+}
+
+message RequestBookRequest {
+  string title = 1;
+  string author_name = 2;
+  string isbn = 3;
+  int32 year = 4;
+  string requested_by = 5;
+  bool is_admin = 6;
+}
+
+message RequestBookResponse {
+  string request_id = 1;
+  string book_id = 2;
+  string author_id = 3;
+  string status = 4;
+}
+
+message RequestComicRequest {
+  string title = 1;
+  string publisher = 2;
+  string comicvine_id = 3;
+  string requested_by = 4;
+  bool is_admin = 5;
+}
+
+message RequestComicResponse {
+  string request_id = 1;
+  string series_id = 2;
+  string status = 3;
+}
+
+message RequestAudiobookRequest {
+  string title = 1;
+  string author_name = 2;
+  string narrator = 3;
+  string asin = 4;
+  int32 year = 5;
+  string requested_by = 6;
+  bool is_admin = 7;
+}
+
+message RequestAudiobookResponse {
+  string request_id = 1;
+  string audiobook_id = 2;
+  string author_id = 3;
   string status = 4;
 }
 
@@ -162,6 +215,17 @@ message DenyRequestRequest {
 }
 
 message DenyRequestResponse {
+  string request_id = 1;
+  string status = 2;
+  string error = 3;
+}
+
+message CancelRequestRequest {
+  string request_id = 1;
+  string cancelled_by = 2;
+}
+
+message CancelRequestResponse {
   string request_id = 1;
   string status = 2;
   string error = 3;

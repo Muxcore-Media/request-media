@@ -9,7 +9,7 @@ import (
 )
 
 func (m *Module) handleDiscoverBrowse(w http.ResponseWriter, r *http.Request, parts []string) bool {
-	if len(parts) != 3 {
+	if len(parts) != 2 {
 		return false
 	}
 	category := strings.ToLower(parts[0])
@@ -29,6 +29,7 @@ func (m *Module) handleDiscoverBrowse(w http.ResponseWriter, r *http.Request, pa
 	ctx, cancel := handlerContext(r)
 	defer cancel()
 
+	tenantID := m.resolveTenant(r.Context(), r.Header)
 	switch category {
 	case "trending":
 		window := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("window")))
@@ -50,7 +51,8 @@ func (m *Module) handleDiscoverBrowse(w http.ResponseWriter, r *http.Request, pa
 			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "results": []searchResult{}})
 			return true
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"results": mapSearchResults("", browseMediaType(parts[1]), resp.GetResults())})
+		writeJSON(w, http.StatusOK, map[string]any{"results": m.overlaySearchResults(r.Context(), tenantID,
+			mapSearchResults("", browseMediaType(parts[1]), resp.GetResults()))})
 	case "popular":
 		popType := metadatav1.MediaType_MEDIA_TYPE_MOVIE
 		if mediaType == metadatav1.TrendingMediaType_TRENDING_MEDIA_TYPE_TV {
@@ -67,7 +69,8 @@ func (m *Module) handleDiscoverBrowse(w http.ResponseWriter, r *http.Request, pa
 			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "results": []searchResult{}})
 			return true
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"results": mapSearchResults("", popType, resp.GetResults())})
+		writeJSON(w, http.StatusOK, map[string]any{"results": m.overlaySearchResults(r.Context(), tenantID,
+			mapSearchResults("", popType, resp.GetResults()))})
 	default:
 		return false
 	}
