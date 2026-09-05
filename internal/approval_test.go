@@ -79,7 +79,7 @@ func testModuleWithApproval(t *testing.T, checker *authz.Checker) *Module {
 }
 
 func TestRequestMovie_PendingWhenApprovalRequired(t *testing.T) {
-	m := testModuleWithApproval(t, allowAllAuthz())
+	m := testModuleWithApproval(t, denyApproveAuthz())
 	resp, err := m.RequestMovie(authCtx("user-1"), &requestmedia.RequestMovieRequest{
 		TmdbId: 218, Title: "The Terminator", Year: 1984,
 	})
@@ -89,7 +89,7 @@ func TestRequestMovie_PendingWhenApprovalRequired(t *testing.T) {
 	if resp.GetStatus() != StatusPending {
 		t.Fatalf("status = %q, want pending", resp.GetStatus())
 	}
-	st, err := m.GetStatus(context.Background(), &requestmedia.GetStatusRequest{RequestId: resp.GetRequestId()})
+	st, err := m.GetStatus(authCtx("user-1"), &requestmedia.GetStatusRequest{RequestId: resp.GetRequestId()})
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestDenyRequest_SetsReason(t *testing.T) {
 	if denyResp.GetStatus() != StatusDenied || denyResp.GetDenyReason() != "already in library" {
 		t.Fatalf("deny resp = %+v", denyResp)
 	}
-	st, err := m.GetStatus(context.Background(), &requestmedia.GetStatusRequest{RequestId: resp.GetRequestId()})
+	st, err := m.GetStatus(authCtx("admin-1"), &requestmedia.GetStatusRequest{RequestId: resp.GetRequestId()})
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestAddToWatchlist(t *testing.T) {
 	if resp.GetStatus() != StatusWatchlisted {
 		t.Fatalf("status = %q", resp.GetStatus())
 	}
-	st, err := m.GetStatus(context.Background(), &requestmedia.GetStatusRequest{RequestId: resp.GetRequestId()})
+	st, err := m.GetStatus(authCtx("user-1"), &requestmedia.GetStatusRequest{RequestId: resp.GetRequestId()})
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}

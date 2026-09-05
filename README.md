@@ -21,6 +21,13 @@ Web UI and gRPC API for requesting movies and TV shows into the MuxCore media pi
 
 Permission checks use the mesh **`authorizer`** module (`AuthService.Can`) and caller identity from `x-caller-id` / `X-Caller-Id` metadata.
 
+### HTTP identity and authz hardening
+
+- **`GET /api/requests`** and **`GetStatus`** require the same `list` permission on resource `media.request` as gRPC `ListRequests`.
+- When the authorizer module cannot be resolved, permission checks **fail closed** (deny) instead of allowing the action. This applies to create, approve, deny, list, and watchlist paths.
+- **`X-Caller-Id` is spoofable** on direct HTTP access without the MuxCore mesh proxy. Do not expose the HTTP port to untrusted networks without the proxy in front. Missing `X-Caller-Id` leaves the caller unauthenticated and authz checks deny the request.
+- Hard mesh verification of caller identity (beyond header trust) is planned follow-up work; until then, run behind the mesh proxy and keep the authorizer module available.
+
 ## Configuration
 
 | Env Var | Default | Description |
@@ -37,13 +44,13 @@ Permission checks use the mesh **`authorizer`** module (`AuthService.Can`) and c
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/requests?status=pending` | List requests (optional status filter) |
+| `GET` | `/api/requests?status=pending` | List requests (requires `list` permission; optional status filter) |
 | `POST` | `/api/requests/{id}/approve` | Approve a pending request |
 | `POST` | `/api/requests/{id}/deny` | Deny with JSON body `{ "reason": "..." }` |
 | `POST` | `/api/watchlist` | Save for later (`watchlisted` status) |
 | `DELETE` | `/api/watchlist/{id}` | Remove watchlist entry |
 
-Pass caller identity via header `X-Caller-Id` when testing HTTP without the mesh proxy.
+Pass caller identity via header `X-Caller-Id` when testing HTTP without the mesh proxy. The header is **not authenticated** unless the mesh proxy sets it; omit it to exercise fail-closed authz behavior.
 
 ## Capability
 
