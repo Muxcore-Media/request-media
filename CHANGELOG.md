@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0] — 2026-09-05
+
+### Added
+
+- Household approval loop: `pending` → `ApproveRequest` / `DenyRequest` with persisted `deny_reason`
+- gRPC `ListRequests`, `ApproveRequest`, `DenyRequest`, `AddToWatchlist`, `RemoveFromWatchlist`
+- Permission checks via mesh `authorizer` (`media.request` resource actions: create, list, approve, deny, watchlist)
+- Auto-approve when caller has approve permission
+- HTTP JSON approve/deny/watchlist endpoints and `GET /api/requests?status=`
+- Setting / env `REQUEST_REQUIRE_APPROVAL` (default `true`)
+
 ## [0.2.7] — 2026-08-10
 
 ### Added

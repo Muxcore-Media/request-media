@@ -6,6 +6,11 @@ service RequestService {
   rpc RequestMovie(RequestMovieRequest) returns (RequestMovieResponse);
   rpc RequestTV(RequestTVRequest) returns (RequestTVResponse);
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  rpc ListRequests(ListRequestsRequest) returns (ListRequestsResponse);
+  rpc ApproveRequest(ApproveRequestRequest) returns (ApproveRequestResponse);
+  rpc DenyRequest(DenyRequestRequest) returns (DenyRequestResponse);
+  rpc AddToWatchlist(AddToWatchlistRequest) returns (AddToWatchlistResponse);
+  rpc RemoveFromWatchlist(RemoveFromWatchlistRequest) returns (RemoveFromWatchlistResponse);
 }
 
 message RequestMovieRequest {
@@ -50,4 +55,70 @@ message GetStatusResponse {
   string status = 6;
   string created_at = 7;
   string updated_at = 8;
+  string deny_reason = 9;
+  string requested_by = 10;
 }
+
+message ListRequestsRequest {
+  // Empty status returns all requests. Common values: pending, denied, watchlisted.
+  string status = 1;
+  string requested_by = 2;
+}
+
+message RequestEntry {
+  string request_id = 1;
+  string item_type = 2;
+  string item_id = 3;
+  string title = 4;
+  int32 year = 5;
+  string status = 6;
+  string created_at = 7;
+  string updated_at = 8;
+  string deny_reason = 9;
+  string requested_by = 10;
+  int32 tmdb_id = 11;
+}
+
+message ListRequestsResponse {
+  repeated RequestEntry requests = 1;
+}
+
+message ApproveRequestRequest {
+  string request_id = 1;
+}
+
+message ApproveRequestResponse {
+  string request_id = 1;
+  string status = 2;
+  string item_id = 3;
+}
+
+message DenyRequestRequest {
+  string request_id = 1;
+  string reason = 2;
+}
+
+message DenyRequestResponse {
+  string request_id = 1;
+  string status = 2;
+  string deny_reason = 3;
+}
+
+message AddToWatchlistRequest {
+  string item_type = 1;
+  int32 tmdb_id = 2;
+  string title = 3;
+  int32 year = 4;
+  string poster = 5;
+}
+
+message AddToWatchlistResponse {
+  string request_id = 1;
+  string status = 2;
+}
+
+message RemoveFromWatchlistRequest {
+  string request_id = 1;
+}
+
+message RemoveFromWatchlistResponse {}

@@ -3,6 +3,7 @@ package reqstore
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -10,16 +11,22 @@ import (
 
 // Record is a persisted media request.
 type Record struct {
-	ID        string
-	ItemType  string
-	ItemID    string
-	TMDBID    int32
-	Title     string
-	Year      int32
-	Poster    string
-	Status    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID            string
+	ItemType      string
+	ItemID        string
+	TMDBID        int32
+	Title         string
+	Year          int32
+	Poster        string
+	Status        string
+	RequestedBy   string
+	DenyReason    string
+	SeasonNumber  int32
+	EpisodeNumber int32
+	Overview      string
+	GenresJSON    string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // Store persists media requests in SQLite.
@@ -60,6 +67,18 @@ func (s *Store) migrate() error {
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
+	for _, stmt := range []string{
+		`ALTER TABLE requests ADD COLUMN requested_by TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE requests ADD COLUMN deny_reason TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE requests ADD COLUMN season_number INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE requests ADD COLUMN episode_number INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE requests ADD COLUMN overview TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE requests ADD COLUMN genres_json TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("migrate column: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -79,8 +98,12 @@ func (s *Store) Put(r *Record) error {
 	}
 	r.UpdatedAt = now
 	_, err := s.db.Exec(`
-		INSERT INTO requests (id, item_type, item_id, tmdb_id, title, year, poster, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO requests (
+			id, item_type, item_id, tmdb_id, title, year, poster, status,
+			requested_by, deny_reason, season_number, episode_number, overview, genres_json,
+			created_at, updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			item_type=excluded.item_type,
 			item_id=excluded.item_id,
@@ -89,8 +112,15 @@ func (s *Store) Put(r *Record) error {
 			year=excluded.year,
 			poster=excluded.poster,
 			status=excluded.status,
+			requested_by=excluded.requested_by,
+			deny_reason=excluded.deny_reason,
+			season_number=excluded.season_number,
+			episode_number=excluded.episode_number,
+			overview=excluded.overview,
+			genres_json=excluded.genres_json,
 			updated_at=excluded.updated_at
 	`, r.ID, r.ItemType, r.ItemID, r.TMDBID, r.Title, r.Year, r.Poster, r.Status,
+		r.RequestedBy, r.DenyReason, r.SeasonNumber, r.EpisodeNumber, r.Overview, r.GenresJSON,
 		r.CreatedAt.UTC().Format(time.RFC3339Nano),
 		r.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	)
@@ -100,10 +130,28 @@ func (s *Store) Put(r *Record) error {
 	return nil
 }
 
+// Delete removes a request by ID.
+func (s *Store) Delete(id string) error {
+	res, err := s.db.Exec(`DELETE FROM requests WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete request: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("request not found")
+	}
+	return nil
+}
+
 // Get returns a request by ID.
 func (s *Store) Get(id string) (*Record, error) {
 	row := s.db.QueryRow(`
-		SELECT id, item_type, item_id, tmdb_id, title, year, poster, status, created_at, updated_at
+		SELECT id, item_type, item_id, tmdb_id, title, year, poster, status,
+			requested_by, deny_reason, season_number, episode_number, overview, genres_json,
+			created_at, updated_at
 		FROM requests WHERE id = ?
 	`, id)
 	return scanRecord(row)
@@ -111,10 +159,28 @@ func (s *Store) Get(id string) (*Record, error) {
 
 // List returns all requests newest first.
 func (s *Store) List() ([]*Record, error) {
-	rows, err := s.db.Query(`
-		SELECT id, item_type, item_id, tmdb_id, title, year, poster, status, created_at, updated_at
-		FROM requests ORDER BY created_at DESC
-	`)
+	return s.ListFiltered("", "")
+}
+
+// ListFiltered returns requests filtered by status and/or requester, newest first.
+func (s *Store) ListFiltered(status, requestedBy string) ([]*Record, error) {
+	query := `
+		SELECT id, item_type, item_id, tmdb_id, title, year, poster, status,
+			requested_by, deny_reason, season_number, episode_number, overview, genres_json,
+			created_at, updated_at
+		FROM requests WHERE 1=1`
+	args := []any{}
+	if status != "" {
+		query += ` AND status = ?`
+		args = append(args, status)
+	}
+	if requestedBy != "" {
+		query += ` AND requested_by = ?`
+		args = append(args, requestedBy)
+	}
+	query += ` ORDER BY created_at DESC`
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list requests: %w", err)
 	}
@@ -150,7 +216,11 @@ type rowScanner interface {
 func scanRecord(row rowScanner) (*Record, error) {
 	var r Record
 	var created, updated string
-	if err := row.Scan(&r.ID, &r.ItemType, &r.ItemID, &r.TMDBID, &r.Title, &r.Year, &r.Poster, &r.Status, &created, &updated); err != nil {
+	if err := row.Scan(
+		&r.ID, &r.ItemType, &r.ItemID, &r.TMDBID, &r.Title, &r.Year, &r.Poster, &r.Status,
+		&r.RequestedBy, &r.DenyReason, &r.SeasonNumber, &r.EpisodeNumber, &r.Overview, &r.GenresJSON,
+		&created, &updated,
+	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("request not found")
 		}
