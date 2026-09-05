@@ -219,6 +219,30 @@ func TestDialAddrForModule(t *testing.T) {
 	}
 }
 
+func TestResolveGRPCAddr(t *testing.T) {
+	t.Setenv("MUXCORE_INSECURE_DISABLE_TLS", "")
+	t.Setenv("MUXCORE_GRPC_INSECURE", "")
+	if got := resolveGRPCAddr(""); got != "" {
+		t.Fatalf("empty: %q", got)
+	}
+	if got := resolveGRPCAddr(":9481"); got != ":9481" {
+		t.Fatalf("TLS mode preserves wildcard: %q", got)
+	}
+	t.Setenv("MUXCORE_INSECURE_DISABLE_TLS", "true")
+	if got := resolveGRPCAddr(":9481"); got != "127.0.0.1:9481" {
+		t.Fatalf("insecure wildcard: %q", got)
+	}
+}
+
+func TestNewModule_DefaultGRPCAddrLoopback(t *testing.T) {
+	t.Setenv("REQUEST_GRPC_ADDR", "")
+	t.Setenv("MUXCORE_INSECURE_DISABLE_TLS", "")
+	m := NewModule(Config{})
+	if m.grpcAddr != "127.0.0.1:9481" {
+		t.Fatalf("grpcAddr = %q, want 127.0.0.1:9481", m.grpcAddr)
+	}
+}
+
 func TestRequestMovie_QueuesAutomationAfterAdd(t *testing.T) {
 	m := testModule(t)
 	moviesStub := &stubMovies{}

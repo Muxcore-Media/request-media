@@ -4,8 +4,8 @@
 
 | Module Version | Core Version | Status |
 |----------------|-------------|--------|
-| v0.3.0           | 0.4.0+     | Current |
-| v0.2.0           | 0.4.0+     | Previous |
+| v0.3.1           | 0.4.0+     | Current |
+| v0.3.0           | 0.4.0+     | Previous |
 
 MVP host stacks pin **core@v0.5.0**. This module declares `minCoreVersion` **0.4.0**.
 

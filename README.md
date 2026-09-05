@@ -32,13 +32,15 @@ Permission checks use the mesh **`authorizer`** module (`AuthService.Can`) and c
 
 | Env Var | Default | Description |
 |---------|---------|-------------|
-| `REQUEST_GRPC_ADDR` | `:9481` | gRPC listen address |
+| `REQUEST_GRPC_ADDR` | `127.0.0.1:9481` | gRPC listen address (loopback by default; override for Docker/all-interfaces) |
 | `REQUEST_HTTP_ADDR` | `:9380` | HTTP UI / JSON API listen address |
 | `REQUEST_REQUIRE_APPROVAL` | `true` | Hold new requests in `pending` until approved |
 | `REQUEST_PREFER_WORKFLOW` | `true` | Prefer workflow engine before library add |
 | `REQUEST_DATA_DIR` | `data` | SQLite persistence directory |
 | `MUXCORE_GRPC_ADDR` | `localhost:9090` | Core mesh gRPC address (client dial) |
-| `MUXCORE_INSECURE_DISABLE_TLS` | unset | Set `true` to disable TLS for module SDK / mesh dial |
+| `MUXCORE_INSECURE_DISABLE_TLS` | unset | Set `true` to disable TLS for inbound gRPC and module SDK / mesh dial |
+| `MUXCORE_GRPC_INSECURE` | unset | Alias for `MUXCORE_INSECURE_DISABLE_TLS` |
+| `REQUEST_TLS_CERT` / `REQUEST_TLS_KEY` / `REQUEST_TLS_CA` | unset | Optional PEM paths for inbound gRPC TLS (falls back to `MUXCORE_TLS_*`, then auto-generated certs under `REQUEST_TLS_DIR` or `~/.muxcore/tls/request-media`) |
 
 ## HTTP JSON (approval)
 
