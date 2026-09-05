@@ -16,23 +16,12 @@ import (
 )
 
 func testModule(t *testing.T) *Module {
-	t.Helper()
-	m := NewModule(Config{
-		ID:       "request-media-test",
-		GRPCAddr: "127.0.0.1:0",
-		HTTPAddr: "127.0.0.1:0",
-		DataDir:  t.TempDir(),
-	})
-	if err := m.Init(context.Background()); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-	t.Cleanup(func() { _ = m.Stop(context.Background()) })
-	return m
+	return testModuleLegacy(t)
 }
 
 func TestRequestMovie_PersistsWhenLibraryUnavailable(t *testing.T) {
 	m := testModule(t)
-	resp, err := m.RequestMovie(context.Background(), &requestmedia.RequestMovieRequest{
+	resp, err := m.RequestMovie(authCtx("test-user"), &requestmedia.RequestMovieRequest{
 		TmdbId: 218, Title: "The Terminator", Year: 1984,
 	})
 	if err != nil {
@@ -68,7 +57,7 @@ func TestRequestMovie_PersistsWhenLibraryUnavailable(t *testing.T) {
 
 func TestRequestTV_PersistsWhenLibraryUnavailable(t *testing.T) {
 	m := testModule(t)
-	resp, err := m.RequestTV(context.Background(), &requestmedia.RequestTVRequest{
+	resp, err := m.RequestTV(authCtx("test-user"), &requestmedia.RequestTVRequest{
 		TmdbId: 1396, Title: "Breaking Bad", Year: 2008, SeasonNumber: 1,
 	})
 	if err != nil {
@@ -166,7 +155,7 @@ func TestRequestMovie_AddMovieViaPreferredCap(t *testing.T) {
 		}
 		return "", fmt.Errorf("no %s", capability)
 	}
-	resp, err := m.RequestMovie(context.Background(), &requestmedia.RequestMovieRequest{
+	resp, err := m.RequestMovie(authCtx("test-user"), &requestmedia.RequestMovieRequest{
 		TmdbId: 550, Title: "Fight Club", Year: 1999, Overview: "soap",
 	})
 	if err != nil {
@@ -202,7 +191,7 @@ func TestRequestTV_AddTVShowFallback(t *testing.T) {
 		}
 		return "", fmt.Errorf("no %s", capability)
 	}
-	resp, err := m.RequestTV(context.Background(), &requestmedia.RequestTVRequest{
+	resp, err := m.RequestTV(authCtx("test-user"), &requestmedia.RequestTVRequest{
 		TmdbId: 1396, Title: "Breaking Bad", Year: 2008, Overview: "chem",
 	})
 	if err != nil {
@@ -250,7 +239,7 @@ func TestRequestMovie_QueuesAutomationAfterAdd(t *testing.T) {
 			return "", fmt.Errorf("no %s", capability)
 		}
 	}
-	resp, err := m.RequestMovie(context.Background(), &requestmedia.RequestMovieRequest{
+	resp, err := m.RequestMovie(authCtx("test-user"), &requestmedia.RequestMovieRequest{
 		TmdbId: 550, Title: "Fight Club", Year: 1999,
 	})
 	if err != nil {
@@ -284,7 +273,7 @@ func TestRequestMovie_SucceedsWhenAutomationUnavailable(t *testing.T) {
 		}
 		return "", fmt.Errorf("no %s", capability)
 	}
-	resp, err := m.RequestMovie(context.Background(), &requestmedia.RequestMovieRequest{
+	resp, err := m.RequestMovie(authCtx("test-user"), &requestmedia.RequestMovieRequest{
 		TmdbId: 550, Title: "Fight Club", Year: 1999,
 	})
 	if err != nil {
@@ -307,7 +296,7 @@ func TestRequestMovie_QueuesAutomationWhenLibraryUnavailable(t *testing.T) {
 		}
 		return "", fmt.Errorf("no %s", capability)
 	}
-	resp, err := m.RequestMovie(context.Background(), &requestmedia.RequestMovieRequest{
+	resp, err := m.RequestMovie(authCtx("test-user"), &requestmedia.RequestMovieRequest{
 		TmdbId: 218, Title: "The Terminator", Year: 1984,
 	})
 	if err != nil {
@@ -350,7 +339,7 @@ func TestRequestTV_QueuesAutomationAfterAdd(t *testing.T) {
 			return "", fmt.Errorf("no %s", capability)
 		}
 	}
-	resp, err := m.RequestTV(context.Background(), &requestmedia.RequestTVRequest{
+	resp, err := m.RequestTV(authCtx("test-user"), &requestmedia.RequestTVRequest{
 		TmdbId: 1396, Title: "Breaking Bad", Year: 2008, SeasonNumber: 1, EpisodeNumber: 1,
 	})
 	if err != nil {

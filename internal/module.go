@@ -12,20 +12,22 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	workflowv1 "github.com/Muxcore-Media/core/proto/gen/muxcore/workflow/v1"
 	"github.com/Muxcore-Media/core/sdk/go/client"
 	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
 	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
-	mgmntv1 "github.com/Muxcore-Media/media-movies/proto/mgmntv1"
-	tvmgmtv1 "github.com/Muxcore-Media/media-tvshows/proto/tvmgmtv1"
 	metadatav1 "github.com/Muxcore-Media/metadata-tmdb/proto/metadatav1"
+	"github.com/Muxcore-Media/request-media/internal/authz"
 	"github.com/Muxcore-Media/request-media/internal/reqstore"
 	requestmedia "github.com/Muxcore-Media/request-media/proto/requestmedia"
 )
@@ -41,8 +43,10 @@ type Module struct {
 	grpcAddr string
 	httpAddr string
 	dataDir  string
-	preferWorkflow bool
-	requests map[string]*requestRecord
+	preferWorkflow  bool
+	requireApproval bool
+	authz           *authz.Checker
+	requests        map[string]*requestRecord
 	grpcSrv  *grpc.Server
 	httpSrv  *http.Server
 	lis      net.Listener
@@ -56,24 +60,32 @@ type Module struct {
 }
 
 type requestRecord struct {
-	ID        string    `json:"id"`
-	ItemType  string    `json:"itemType"`
-	ItemID    string    `json:"itemId"`
-	TMDBID    int32     `json:"tmdbId"`
-	Title     string    `json:"title"`
-	Year      int32     `json:"year"`
-	Poster    string    `json:"poster"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID            string    `json:"id"`
+	ItemType      string    `json:"itemType"`
+	ItemID        string    `json:"itemId"`
+	TMDBID        int32     `json:"tmdbId"`
+	Title         string    `json:"title"`
+	Year          int32     `json:"year"`
+	Poster        string    `json:"poster"`
+	Status        string    `json:"status"`
+	RequestedBy   string    `json:"requestedBy"`
+	DenyReason    string    `json:"denyReason"`
+	SeasonNumber  int32     `json:"seasonNumber"`
+	EpisodeNumber int32     `json:"episodeNumber"`
+	Overview      string    `json:"overview"`
+	Genres        []string  `json:"genres"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 type Config struct {
-	ID             string
-	GRPCAddr       string
-	HTTPAddr       string
-	DataDir        string
-	PreferWorkflow *bool
+	ID              string
+	GRPCAddr        string
+	HTTPAddr        string
+	DataDir         string
+	PreferWorkflow  *bool
+	RequireApproval *bool
+	Authz           *authz.Checker
 }
 
 func NewModule(cfg Config) *Module {
@@ -113,13 +125,25 @@ func NewModule(cfg Config) *Module {
 			prefer = b
 		}
 	}
+	requireApproval := true
+	if cfg.RequireApproval != nil {
+		requireApproval = *cfg.RequireApproval
+	}
+	if v := os.Getenv("REQUEST_REQUIRE_APPROVAL"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			requireApproval = b
+		}
+	}
+	checker := cfg.Authz
 	return &Module{
-		id:             cfg.ID,
-		grpcAddr:       cfg.GRPCAddr,
-		httpAddr:       cfg.HTTPAddr,
-		dataDir:        cfg.DataDir,
-		preferWorkflow: prefer,
-		requests:       make(map[string]*requestRecord),
+		id:              cfg.ID,
+		grpcAddr:        cfg.GRPCAddr,
+		httpAddr:        cfg.HTTPAddr,
+		dataDir:         cfg.DataDir,
+		preferWorkflow:  prefer,
+		requireApproval: requireApproval,
+		authz:           checker,
+		requests:        make(map[string]*requestRecord),
 	}
 }
 
@@ -127,7 +151,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:             m.id,
 		Name:           "Request Media",
-		Version:      "0.2.7",
+		Version:      "0.3.0",
 		Roles:          []string{"media_request"},
 		Description:    "Web UI and gRPC API for requesting movies and TV shows",
 		Author:         "MuxCore",
@@ -156,6 +180,13 @@ func (m *Module) Init(ctx context.Context) error {
 		m.requests[id] = fromStoreRecord(r)
 	}
 	m.mu.Unlock()
+	if m.authz == nil {
+		m.authz = authz.New(authz.Config{
+			FindAuthorizerAddr: func(ctx context.Context) (string, error) {
+				return m.findModuleAddr(ctx, "authorizer")
+			},
+		})
+	}
 
 	grpcLis, err := net.Listen("tcp", m.grpcAddr)
 	if err != nil {
@@ -182,6 +213,9 @@ func (m *Module) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/search", m.handleSearch)
 	mux.HandleFunc("/api/request", m.handleRequest)
 	mux.HandleFunc("/api/requests", m.handleRequests)
+	mux.HandleFunc("/api/requests/", m.handleRequestAction)
+	mux.HandleFunc("/api/watchlist", m.handleWatchlist)
+	mux.HandleFunc("/api/watchlist/", m.handleWatchlistItem)
 	mux.HandleFunc("/", m.handleIndex)
 
 	m.httpSrv = &http.Server{Handler: mux}
@@ -337,6 +371,9 @@ func toStoreRecord(r *requestRecord) *reqstore.Record {
 	return &reqstore.Record{
 		ID: r.ID, ItemType: r.ItemType, ItemID: r.ItemID, TMDBID: r.TMDBID,
 		Title: r.Title, Year: r.Year, Poster: r.Poster, Status: r.Status,
+		RequestedBy: r.RequestedBy, DenyReason: r.DenyReason,
+		SeasonNumber: r.SeasonNumber, EpisodeNumber: r.EpisodeNumber,
+		Overview: r.Overview, GenresJSON: encodeGenres(r.Genres),
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
 }
@@ -345,8 +382,17 @@ func fromStoreRecord(r *reqstore.Record) *requestRecord {
 	return &requestRecord{
 		ID: r.ID, ItemType: r.ItemType, ItemID: r.ItemID, TMDBID: r.TMDBID,
 		Title: r.Title, Year: r.Year, Poster: r.Poster, Status: r.Status,
+		RequestedBy: r.RequestedBy, DenyReason: r.DenyReason,
+		SeasonNumber: r.SeasonNumber, EpisodeNumber: r.EpisodeNumber,
+		Overview: r.Overview, Genres: decodeGenres(r.GenresJSON),
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
+}
+
+func (m *Module) getRequireApproval() bool {
+	m.cfgMu.RLock()
+	defer m.cfgMu.RUnlock()
+	return m.requireApproval
 }
 
 func (m *Module) ensureAutomation(ctx context.Context) error {
@@ -489,6 +535,14 @@ func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func httpCallerCtx(r *http.Request) context.Context {
+	caller := r.Header.Get("X-Caller-Id")
+	if caller == "" {
+		caller = "http-local"
+	}
+	return contracts.WithCallerID(r.Context(), caller)
+}
+
 func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -506,7 +560,7 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gResp, err := m.RequestMovie(r.Context(), &requestmedia.RequestMovieRequest{
+	gResp, err := m.RequestMovie(httpCallerCtx(r), &requestmedia.RequestMovieRequest{
 		TmdbId:   req.TMDBID,
 		Title:    req.Title,
 		Year:     req.Year,
@@ -539,9 +593,13 @@ func (m *Module) handleRequests(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	statusFilter := r.URL.Query().Get("status")
 	m.mu.RLock()
 	list := make([]*requestRecord, 0, len(m.requests))
 	for _, rec := range m.requests {
+		if statusFilter != "" && rec.Status != statusFilter {
+			continue
+		}
 		list = append(list, rec)
 	}
 	m.mu.RUnlock()
@@ -549,6 +607,114 @@ func (m *Module) handleRequests(w http.ResponseWriter, r *http.Request) {
 		return list[i].CreatedAt.After(list[j].CreatedAt)
 	})
 	json.NewEncoder(w).Encode(list)
+}
+
+func (m *Module) handleRequestAction(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/requests/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 2 {
+		http.NotFound(w, r)
+		return
+	}
+	requestID, action := parts[0], parts[1]
+	ctx := httpCallerCtx(r)
+	switch action {
+	case "approve":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		resp, err := m.ApproveRequest(ctx, &requestmedia.ApproveRequestRequest{RequestId: requestID})
+		if err != nil {
+			writeGRPCError(w, err)
+			return
+		}
+		json.NewEncoder(w).Encode(resp)
+	case "deny":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		resp, err := m.DenyRequest(ctx, &requestmedia.DenyRequestRequest{RequestId: requestID, Reason: body.Reason})
+		if err != nil {
+			writeGRPCError(w, err)
+			return
+		}
+		json.NewEncoder(w).Encode(resp)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (m *Module) handleWatchlist(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ctx := httpCallerCtx(r)
+	var req struct {
+		ItemType string `json:"itemType"`
+		TMDBID   int32  `json:"tmdbId"`
+		Title    string `json:"title"`
+		Year     int32  `json:"year"`
+		Poster   string `json:"poster"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	resp, err := m.AddToWatchlist(ctx, &requestmedia.AddToWatchlistRequest{
+		ItemType: req.ItemType, TmdbId: req.TMDBID, Title: req.Title, Year: req.Year, Poster: req.Poster,
+	})
+	if err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (m *Module) handleWatchlistItem(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/watchlist/")
+	if id == "" {
+		http.Error(w, "request id required", http.StatusBadRequest)
+		return
+	}
+	ctx := httpCallerCtx(r)
+	if _, err := m.RemoveFromWatchlist(ctx, &requestmedia.RemoveFromWatchlistRequest{RequestId: id}); err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func writeGRPCError(w http.ResponseWriter, err error) {
+	st, ok := status.FromError(err)
+	if !ok {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	code := http.StatusInternalServerError
+	switch st.Code() {
+	case codes.Unauthenticated:
+		code = http.StatusUnauthorized
+	case codes.PermissionDenied:
+		code = http.StatusForbidden
+	case codes.NotFound:
+		code = http.StatusNotFound
+	case codes.FailedPrecondition:
+		code = http.StatusConflict
+	case codes.InvalidArgument:
+		code = http.StatusBadRequest
+	}
+	http.Error(w, st.Message(), code)
 }
 
 func (m *Module) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -821,177 +987,33 @@ func (m *Module) tryRunWorkflow(ctx context.Context, definitionID string, input 
 
 func (m *Module) RequestMovie(ctx context.Context, req *requestmedia.RequestMovieRequest) (*requestmedia.RequestMovieResponse, error) {
 	requestID := fmt.Sprintf("req_mv_%d", time.Now().UnixNano())
-
-	if m.getPreferWorkflow() {
-		if runID, ok := m.tryRunWorkflow(ctx, "movie-request", map[string]string{
-			"title":      req.GetTitle(),
-			"year":       fmt.Sprintf("%d", req.GetYear()),
-			"tmdb_id":    fmt.Sprintf("%d", req.GetTmdbId()),
-			"request_id": requestID,
-		}); ok {
-			m.saveRequest(&requestRecord{
-				ID: requestID, ItemType: "movie", Title: req.GetTitle(),
-				Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "workflow",
-			})
-			go m.publish(context.Background(), "media.movie.requested", map[string]interface{}{
-				"request_id": requestID, "tmdb_id": req.GetTmdbId(),
-				"title": req.GetTitle(), "year": req.GetYear(), "run_id": runID,
-			})
-			m.tryQueueForAcquisition(ctx, queueParams{
-				ItemType: "movie", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
-				TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
-			})
-			return &requestmedia.RequestMovieResponse{
-				RequestId: requestID, MovieId: "", Status: "workflow",
-			}, nil
-		}
+	rec := &requestRecord{
+		ID: requestID, ItemType: "movie", Title: req.GetTitle(),
+		Year: req.GetYear(), TMDBID: req.GetTmdbId(), Overview: req.GetOverview(),
+		Genres: append([]string(nil), req.GetGenres()...),
 	}
-
-	addr, err := m.findModuleAddrPrefer(ctx, "media.library.movie", "media.library.movies", "media.library")
+	finalStatus, itemID, err := m.createPendingOrFulfill(ctx, rec)
 	if err != nil {
-		go m.publish(context.Background(), "media.movie.requested", map[string]interface{}{
-			"request_id": requestID, "tmdb_id": req.GetTmdbId(),
-			"title": req.GetTitle(), "year": req.GetYear(),
-		})
-		m.saveRequest(&requestRecord{
-			ID: requestID, ItemType: "movie", Title: req.GetTitle(),
-			Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "requested",
-		})
-		m.tryQueueForAcquisition(ctx, queueParams{
-			ItemType: "movie", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
-			TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
-		})
-		return &requestmedia.RequestMovieResponse{
-			RequestId: requestID, MovieId: "", Status: "requested",
-		}, nil
+		return nil, err
 	}
-
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, fmt.Errorf("dial media-movies: %w", err)
-	}
-	defer conn.Close()
-
-	moviesClient := mgmntv1.NewMovieManagementServiceClient(conn)
-	addResp, err := moviesClient.AddMovie(ctx, &mgmntv1.AddMovieRequest{
-		TmdbId:   req.GetTmdbId(),
-		Title:    req.GetTitle(),
-		Year:     req.GetYear(),
-		Overview: req.GetOverview(),
-		Genres:   req.GetGenres(),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("add movie: %w", err)
-	}
-
-	movieID := addResp.GetMovieId()
-	m.saveRequest(&requestRecord{
-		ID: requestID, ItemType: "movie", ItemID: movieID, TMDBID: req.GetTmdbId(),
-		Title: req.GetTitle(), Year: req.GetYear(), Status: "added",
-	})
-
-	go m.publish(context.Background(), "media.movie.requested", map[string]interface{}{
-		"request_id": requestID, "movie_id": movieID,
-		"tmdb_id": req.GetTmdbId(), "title": req.GetTitle(), "year": req.GetYear(),
-	})
-
-	m.tryQueueForAcquisition(ctx, queueParams{
-		ItemType: "movie", ItemID: movieID,
-		TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
-	})
-
-	slog.Info("movie requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId(), "movie_id", movieID)
 	return &requestmedia.RequestMovieResponse{
-		RequestId: requestID, MovieId: movieID, Status: "added",
+		RequestId: requestID, MovieId: itemID, Status: finalStatus,
 	}, nil
 }
 
 func (m *Module) RequestTV(ctx context.Context, req *requestmedia.RequestTVRequest) (*requestmedia.RequestTVResponse, error) {
 	requestID := fmt.Sprintf("req_tv_%d", time.Now().UnixNano())
-	if m.getPreferWorkflow() {
-		if runID, ok := m.tryRunWorkflow(ctx, "tv-request", map[string]string{
-			"title":          req.GetTitle(),
-			"year":           fmt.Sprintf("%d", req.GetYear()),
-			"tmdb_id":        fmt.Sprintf("%d", req.GetTmdbId()),
-			"season_number":  fmt.Sprintf("%d", req.GetSeasonNumber()),
-			"episode_number": fmt.Sprintf("%d", req.GetEpisodeNumber()),
-			"request_id":     requestID,
-		}); ok {
-			m.saveRequest(&requestRecord{
-				ID: requestID, ItemType: "tv", Title: req.GetTitle(),
-				Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "workflow",
-			})
-			go m.publish(context.Background(), "media.tv.requested", map[string]interface{}{
-				"request_id": requestID, "tmdb_id": req.GetTmdbId(),
-				"title": req.GetTitle(), "year": req.GetYear(), "run_id": runID,
-				"season_number": req.GetSeasonNumber(), "episode_number": req.GetEpisodeNumber(),
-			})
-			m.tryQueueForAcquisition(ctx, queueParams{
-				ItemType: "tv", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
-				TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
-				SeasonNumber: req.GetSeasonNumber(), EpisodeNumber: req.GetEpisodeNumber(),
-			})
-			return &requestmedia.RequestTVResponse{RequestId: requestID, Status: "workflow"}, nil
-		}
-	}
-
-	addr, err := m.findModuleAddr(ctx, "media.library.tv")
-	if err != nil {
-		m.saveRequest(&requestRecord{
-			ID: requestID, ItemType: "tv", Title: req.GetTitle(),
-			Year: req.GetYear(), TMDBID: req.GetTmdbId(), Status: "requested",
-		})
-		go m.publish(context.Background(), "media.tv.requested", map[string]interface{}{
-			"request_id": requestID, "tmdb_id": req.GetTmdbId(),
-			"title": req.GetTitle(), "year": req.GetYear(),
-			"season_number": req.GetSeasonNumber(), "episode_number": req.GetEpisodeNumber(),
-		})
-		m.tryQueueForAcquisition(ctx, queueParams{
-			ItemType: "tv", ItemID: fmt.Sprintf("tmdb_%d", req.GetTmdbId()),
-			TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
-			SeasonNumber: req.GetSeasonNumber(), EpisodeNumber: req.GetEpisodeNumber(),
-		})
-		slog.Info("tv requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId())
-		return &requestmedia.RequestTVResponse{
-			RequestId: requestID, Status: "requested",
-		}, nil
-	}
-
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, fmt.Errorf("dial media-tvshows: %w", err)
-	}
-	defer conn.Close()
-
-	tvClient := tvmgmtv1.NewTvManagementServiceClient(conn)
-	addResp, err := tvClient.AddTVShow(ctx, &tvmgmtv1.AddTVShowRequest{
-		TmdbId:   req.GetTmdbId(),
-		Name:     req.GetTitle(),
-		Year:     req.GetYear(),
-		Overview: req.GetOverview(),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("add tv show: %w", err)
-	}
-
-	seriesID := addResp.GetSeriesId()
-	m.saveRequest(&requestRecord{
-		ID: requestID, ItemType: "tv", ItemID: seriesID, TMDBID: req.GetTmdbId(),
-		Title: req.GetTitle(), Year: req.GetYear(), Status: "added",
-	})
-	go m.publish(context.Background(), "media.tv.requested", map[string]interface{}{
-		"request_id": requestID, "series_id": seriesID, "tmdb_id": req.GetTmdbId(),
-		"title": req.GetTitle(), "year": req.GetYear(),
-		"season_number": req.GetSeasonNumber(), "episode_number": req.GetEpisodeNumber(),
-	})
-	m.tryQueueForAcquisition(ctx, queueParams{
-		ItemType: "tv", ItemID: seriesID,
-		TmdbID: req.GetTmdbId(), Title: req.GetTitle(), Year: req.GetYear(),
+	rec := &requestRecord{
+		ID: requestID, ItemType: "tv", Title: req.GetTitle(),
+		Year: req.GetYear(), TMDBID: req.GetTmdbId(), Overview: req.GetOverview(),
 		SeasonNumber: req.GetSeasonNumber(), EpisodeNumber: req.GetEpisodeNumber(),
-	})
-	slog.Info("tv requested", "title", req.GetTitle(), "tmdb_id", req.GetTmdbId(), "series_id", seriesID)
+	}
+	finalStatus, itemID, err := m.createPendingOrFulfill(ctx, rec)
+	if err != nil {
+		return nil, err
+	}
 	return &requestmedia.RequestTVResponse{
-		RequestId: requestID, SeriesId: seriesID, Status: "added",
+		RequestId: requestID, SeriesId: itemID, Status: finalStatus,
 	}, nil
 }
 
@@ -1006,6 +1028,7 @@ func (m *Module) GetStatus(ctx context.Context, req *requestmedia.GetStatusReque
 		RequestId: rec.ID, ItemType: rec.ItemType, ItemId: rec.ItemID,
 		Title: rec.Title, Year: rec.Year, Status: rec.Status,
 		CreatedAt: rec.CreatedAt.Format(time.RFC3339), UpdatedAt: rec.UpdatedAt.Format(time.RFC3339),
+		DenyReason: rec.DenyReason, RequestedBy: rec.RequestedBy,
 	}, nil
 }
 
