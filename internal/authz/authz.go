@@ -58,8 +58,8 @@ func meshCan(findAddr func(ctx context.Context) (string, error)) CanFunc {
 		}
 		addr, err := findAddr(ctx)
 		if err != nil {
-			slog.Debug("authorizer unavailable, allowing action", "user_id", userID, "action", action, "resource", resource, "error", err)
-			return true, nil
+			slog.Warn("authorizer unavailable, denying action", "user_id", userID, "action", action, "resource", resource, "error", err)
+			return false, nil
 		}
 		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
@@ -102,6 +102,11 @@ func (c *Checker) RequireCreate(ctx context.Context, userID string) error {
 }
 
 func (c *Checker) RequireList(ctx context.Context, userID string) error {
+	return c.require(ctx, userID, ActionList, ResourceMediaRequest)
+}
+
+// RequireViewStatus gates read access to a single request (uses list permission).
+func (c *Checker) RequireViewStatus(ctx context.Context, userID string) error {
 	return c.require(ctx, userID, ActionList, ResourceMediaRequest)
 }
 

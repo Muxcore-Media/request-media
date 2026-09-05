@@ -535,11 +535,11 @@ func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// httpCallerCtx propagates caller identity from the HTTP request.
+// X-Caller-Id is only trustworthy when injected by the MuxCore mesh proxy; direct
+// clients can spoof it. Missing identity leaves the caller empty so authz fails closed.
 func httpCallerCtx(r *http.Request) context.Context {
-	caller := r.Header.Get("X-Caller-Id")
-	if caller == "" {
-		caller = "http-local"
-	}
+	caller := strings.TrimSpace(r.Header.Get("X-Caller-Id"))
 	return contracts.WithCallerID(r.Context(), caller)
 }
 
@@ -591,6 +591,12 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 func (m *Module) handleRequests(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ctx := httpCallerCtx(r)
+	caller := authz.CallerID(ctx)
+	if err := m.authz.RequireList(ctx, caller); err != nil {
+		writeGRPCError(w, err)
 		return
 	}
 	statusFilter := r.URL.Query().Get("status")
@@ -1018,11 +1024,15 @@ func (m *Module) RequestTV(ctx context.Context, req *requestmedia.RequestTVReque
 }
 
 func (m *Module) GetStatus(ctx context.Context, req *requestmedia.GetStatusRequest) (*requestmedia.GetStatusResponse, error) {
+	caller := authz.CallerID(ctx)
+	if err := m.authz.RequireViewStatus(ctx, caller); err != nil {
+		return nil, err
+	}
 	m.mu.RLock()
 	rec, ok := m.requests[req.GetRequestId()]
 	m.mu.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("request not found: %s", req.GetRequestId())
+		return nil, status.Errorf(codes.NotFound, "request not found: %s", req.GetRequestId())
 	}
 	return &requestmedia.GetStatusResponse{
 		RequestId: rec.ID, ItemType: rec.ItemType, ItemId: rec.ItemID,
