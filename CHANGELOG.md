@@ -11,6 +11,13 @@
 - HTTP JSON approve/deny/watchlist endpoints and `GET /api/requests?status=`
 - Setting / env `REQUEST_REQUIRE_APPROVAL` (default `true`)
 
+### Fixed
+
+- Authz fail-closed when authorizer module is unavailable (no longer allows approve/create/list)
+- HTTP `GET /api/requests` gated with same `list` permission as gRPC `ListRequests`
+- `GetStatus` requires `list` permission on `media.request`
+- HTTP caller identity no longer defaults to spoofable `http-local`; missing `X-Caller-Id` is unauthenticated
+
 ## [0.2.7] — 2026-08-10
 
 ### Added

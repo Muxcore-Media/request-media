@@ -30,7 +30,7 @@ func TestRequestMovie_PersistsWhenLibraryUnavailable(t *testing.T) {
 	if resp.GetStatus() != "requested" {
 		t.Fatalf("status = %q, want requested", resp.GetStatus())
 	}
-	st, err := m.GetStatus(context.Background(), &requestmedia.GetStatusRequest{RequestId: resp.GetRequestId()})
+	st, err := m.GetStatus(authCtx("test-user"), &requestmedia.GetStatusRequest{RequestId: resp.GetRequestId()})
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestRequestMovie_PersistsWhenLibraryUnavailable(t *testing.T) {
 		t.Fatalf("re-Init: %v", err)
 	}
 	defer m2.Stop(context.Background())
-	st2, err := m2.GetStatus(context.Background(), &requestmedia.GetStatusRequest{RequestId: resp.GetRequestId()})
+	st2, err := m2.GetStatus(authCtx("test-user"), &requestmedia.GetStatusRequest{RequestId: resp.GetRequestId()})
 	if err != nil {
 		t.Fatalf("GetStatus after reload: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestRequestTV_PersistsWhenLibraryUnavailable(t *testing.T) {
 	if resp.GetStatus() != "requested" {
 		t.Fatalf("status = %q, want requested", resp.GetStatus())
 	}
-	st, err := m.GetStatus(context.Background(), &requestmedia.GetStatusRequest{RequestId: resp.GetRequestId()})
+	st, err := m.GetStatus(authCtx("test-user"), &requestmedia.GetStatusRequest{RequestId: resp.GetRequestId()})
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestRequestMovie_AddMovieViaPreferredCap(t *testing.T) {
 	if stub.last == nil || stub.last.GetTitle() != "Fight Club" {
 		t.Fatalf("AddMovie not called: %+v", stub.last)
 	}
-	st, err := m.GetStatus(context.Background(), &requestmedia.GetStatusRequest{RequestId: resp.GetRequestId()})
+	st, err := m.GetStatus(authCtx("test-user"), &requestmedia.GetStatusRequest{RequestId: resp.GetRequestId()})
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
