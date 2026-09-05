@@ -18,6 +18,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
@@ -28,6 +29,7 @@ import (
 	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
 	metadatav1 "github.com/Muxcore-Media/metadata-tmdb/proto/metadatav1"
 	"github.com/Muxcore-Media/request-media/internal/authz"
+	"github.com/Muxcore-Media/request-media/internal/grpctls"
 	"github.com/Muxcore-Media/request-media/internal/reqstore"
 	requestmedia "github.com/Muxcore-Media/request-media/proto/requestmedia"
 )
@@ -96,9 +98,10 @@ func NewModule(cfg Config) *Module {
 		if v := os.Getenv("REQUEST_GRPC_ADDR"); v != "" {
 			cfg.GRPCAddr = v
 		}
-		if cfg.GRPCAddr == "" {
-			cfg.GRPCAddr = ":9481"
-		}
+	}
+	cfg.GRPCAddr = resolveGRPCAddr(cfg.GRPCAddr)
+	if cfg.GRPCAddr == "" {
+		cfg.GRPCAddr = "127.0.0.1:9481"
 	}
 	if cfg.HTTPAddr == "" {
 		if v := os.Getenv("REQUEST_HTTP_ADDR"); v != "" {
@@ -151,7 +154,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:             m.id,
 		Name:           "Request Media",
-		Version:      "0.3.0",
+		Version:      "0.3.1",
 		Roles:          []string{"media_request"},
 		Description:    "Web UI and gRPC API for requesting movies and TV shows",
 		Author:         "MuxCore",
@@ -205,7 +208,21 @@ func (m *Module) Init(ctx context.Context) error {
 }
 
 func (m *Module) Start(ctx context.Context) error {
-	m.grpcSrv = grpc.NewServer()
+	var grpcOpts []grpc.ServerOption
+	tlsCfg, err := grpctls.ServerConfig()
+	if err != nil {
+		return fmt.Errorf("gRPC TLS: %w", err)
+	}
+	if tlsCfg != nil {
+		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
+		slog.Info("request-media gRPC TLS enabled", "addr", m.grpcAddr)
+	} else {
+		slog.Warn("request-media gRPC listening without TLS (dev only)",
+			"addr", m.grpcAddr,
+			"hint", "unset MUXCORE_INSECURE_DISABLE_TLS for production",
+		)
+	}
+	m.grpcSrv = grpc.NewServer(grpcOpts...)
 	requestmedia.RegisterRequestServiceServer(m.grpcSrv, m)
 	modulesdk.RegisterSettings(m.grpcSrv, m.id, m)
 
@@ -309,6 +326,25 @@ func (m *Module) findModuleAddr(ctx context.Context, capability string) (string,
 		return addr, nil
 	}
 	return "", fmt.Errorf("no module with capability %q found", capability)
+}
+
+// resolveGRPCAddr prefers loopback when plaintext is explicitly enabled and the
+// bind address would otherwise listen on all interfaces.
+func resolveGRPCAddr(addr string) string {
+	if !grpctls.InsecureAllowed() {
+		return addr
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		if strings.HasPrefix(addr, ":") {
+			return "127.0.0.1" + addr
+		}
+		return addr
+	}
+	if host == "" || host == "0.0.0.0" {
+		return "127.0.0.1:" + port
+	}
+	return addr
 }
 
 // dialAddrForModule maps discovery HttpAddr to a dial target.
