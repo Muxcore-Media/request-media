@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.2] — 2026-09-06
+
+### Added
+
+- Publish `media.request.ready` once when a user-requested title becomes playable
+  (`has_file` / file-added / imported — not `status=available`)
+- Subscribe to `media.movie.file.added`, `media.tv.episode.file.added`,
+  `media.file.imported` (plus wiki-era aliases) after mesh connect
+- Dedupe table `request_ready_notified` keyed by `request_id`
+
 ## [0.3.1] — 2026-09-05
 
 ### Added

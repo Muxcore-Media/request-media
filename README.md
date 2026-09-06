@@ -10,6 +10,37 @@ Web UI and gRPC API for requesting movies and TV shows into the MuxCore media pi
 - Household approval loop: new requests start as `pending` until an approver calls `ApproveRequest` (or auto-approve when the caller has approve permission)
 - Prefers workflow engine (`movie-request` / `tv-request`); falls back to `media.library` `AddMovie` for movies, or event-only `requested` status after approval
 - Publishes `media.movie.requested` / `media.tv.requested` events via the core mesh
+- Publishes `media.request.ready` once when a requested title becomes **playable**
+
+## Playable-ready event (`media.request.ready`)
+
+This module is the **emitter** for Discord/webhook "your request is ready" notifications
+(umbrella#83). playback-monitor consumes the event and dispatches matching rules.
+
+**Playable means `has_file`**, the same semantics as media-ui ready toasts — **not**
+`status=available` and **not** request status `added` (cataloged). After mesh connect,
+request-media subscribes to:
+
+- `media.movie.file.added` / legacy `media.movie.file_added`
+- `media.tv.episode.file.added` / legacy `media.tv.episode_file_added`
+- `media.file.imported`
+
+Matching watchable requests (`requested` / `added` / `workflow`; not `pending`,
+`denied`, or `watchlisted`) are selected by `item_id` / `movie_id` / `series_id`
+or `tmdb_id` + `item_type`. The event is published **once per `request_id`**
+(`request_ready_notified` table). Payload:
+
+| Field | JSON |
+|-------|------|
+| Request ID | `request_id` |
+| Requester | `requested_by` |
+| Title | `title` |
+| Year | `year` |
+| Item type | `item_type` |
+| TMDB ID | `tmdb_id` |
+| Library item | `item_id` |
+
+Unconfigured webhook destinations remain a quiet no-op in playback-monitor.
 
 ## Approval loop
 

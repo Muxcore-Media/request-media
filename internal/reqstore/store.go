@@ -79,7 +79,7 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("migrate column: %w", err)
 		}
 	}
-	return nil
+	return s.ensureReadyTable()
 }
 
 // Close closes the database.
