@@ -165,7 +165,7 @@ func requestMatchesFileReady(rec *requestRecord, hint fileReadyHint) bool {
 	return false
 }
 
-func (m *Module) publishReadyForHint(ctx context.Context) {
+func (m *Module) publishReadyForHint(ctx context.Context, hint fileReadyHint) {
 	m.mu.RLock()
 	matches := make([]*requestRecord, 0)
 	for _, rec := range m.requests {
