@@ -154,7 +154,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:             m.id,
 		Name:           "Request Media",
-		Version:      "0.3.1",
+		Version:      "0.3.2",
 		Roles:          []string{"media_request"},
 		Description:    "Web UI and gRPC API for requesting movies and TV shows",
 		Author:         "MuxCore",
@@ -295,6 +295,7 @@ func (m *Module) dialCore(ctx context.Context) {
 	}
 	m.mc = c
 	slog.Info("request-media: connected to core mesh", "addr", meshAddr)
+	go m.runReadySubscriptions(ctx)
 }
 
 func (m *Module) publish(ctx context.Context, eventType string, payload map[string]interface{}) {
