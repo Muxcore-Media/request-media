@@ -42,6 +42,8 @@ Uses mesh capability **`authorizer`** (`AuthService.Can`) with resource **`media
 
 Set `REQUEST_REQUIRE_APPROVAL=false` to restore pre-v0.3.0 immediate handoff behavior.
 
+AI tickets (`ai-tickets`) resolve wrong-language reports into a `replace_media` action. This module stays non-AI: consume that action by creating a normal request through the existing HTTP/gRPC APIs (or `media.movie.requested`).
+
 ## Breaking Changes
 
 **v0.3.0** — New requests default to **`pending`** when `REQUEST_REQUIRE_APPROVAL=true` (default). Approve/deny RPCs and extended `GetStatus` fields (`deny_reason`, `requested_by`) added. Pre-1.0 module: interfaces may still change without a major version bump.

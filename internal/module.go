@@ -30,6 +30,7 @@ import (
 	metadatav1 "github.com/Muxcore-Media/metadata-tmdb/proto/metadatav1"
 	"github.com/Muxcore-Media/request-media/internal/authz"
 	"github.com/Muxcore-Media/request-media/internal/grpctls"
+	"github.com/Muxcore-Media/request-media/internal/reqquality"
 	"github.com/Muxcore-Media/request-media/internal/reqstore"
 	requestmedia "github.com/Muxcore-Media/request-media/proto/requestmedia"
 )
@@ -37,22 +38,25 @@ import (
 type Module struct {
 	requestmedia.UnimplementedRequestServiceServer
 
-	mu    sync.RWMutex
-	cfgMu sync.RWMutex
-	mc    *client.Client
-	store *reqstore.Store
-	id    string
-	grpcAddr string
-	httpAddr string
-	dataDir  string
-	preferWorkflow  bool
-	requireApproval bool
-	authz           *authz.Checker
-	requests        map[string]*requestRecord
-	grpcSrv  *grpc.Server
-	httpSrv  *http.Server
-	lis      net.Listener
-	httpLis  net.Listener
+	mu               sync.RWMutex
+	cfgMu            sync.RWMutex
+	mc               *client.Client
+	store            *reqstore.Store
+	id               string
+	grpcAddr         string
+	httpAddr         string
+	dataDir          string
+	preferWorkflow   bool
+	requireApproval  bool
+	quotaMaxPending  int
+	quotaMaxPerWeek  int
+	autoApproveUsers []string
+	authz            *authz.Checker
+	requests         map[string]*requestRecord
+	grpcSrv          *grpc.Server
+	httpSrv          *http.Server
+	lis              net.Listener
+	httpLis          net.Listener
 
 	// findAddr overrides capability discovery in tests.
 	findAddr func(ctx context.Context, capability string) (string, error)
@@ -62,22 +66,23 @@ type Module struct {
 }
 
 type requestRecord struct {
-	ID            string    `json:"id"`
-	ItemType      string    `json:"itemType"`
-	ItemID        string    `json:"itemId"`
-	TMDBID        int32     `json:"tmdbId"`
-	Title         string    `json:"title"`
-	Year          int32     `json:"year"`
-	Poster        string    `json:"poster"`
-	Status        string    `json:"status"`
-	RequestedBy   string    `json:"requestedBy"`
-	DenyReason    string    `json:"denyReason"`
-	SeasonNumber  int32     `json:"seasonNumber"`
-	EpisodeNumber int32     `json:"episodeNumber"`
-	Overview      string    `json:"overview"`
-	Genres        []string  `json:"genres"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ID               string    `json:"id"`
+	ItemType         string    `json:"itemType"`
+	ItemID           string    `json:"itemId"`
+	TMDBID           int32     `json:"tmdbId"`
+	Title            string    `json:"title"`
+	Year             int32     `json:"year"`
+	Poster           string    `json:"poster"`
+	Status           string    `json:"status"`
+	RequestedBy      string    `json:"requestedBy"`
+	DenyReason       string    `json:"denyReason"`
+	SeasonNumber     int32     `json:"seasonNumber"`
+	EpisodeNumber    int32     `json:"episodeNumber"`
+	Overview         string    `json:"overview"`
+	Genres           []string  `json:"genres"`
+	QualityProfileID string    `json:"qualityProfileId,omitempty"`
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
 }
 
 type Config struct {
@@ -137,16 +142,20 @@ func NewModule(cfg Config) *Module {
 			requireApproval = b
 		}
 	}
+	envPolicy := policyFromEnv()
 	checker := cfg.Authz
 	return &Module{
-		id:              cfg.ID,
-		grpcAddr:        cfg.GRPCAddr,
-		httpAddr:        cfg.HTTPAddr,
-		dataDir:         cfg.DataDir,
-		preferWorkflow:  prefer,
-		requireApproval: requireApproval,
-		authz:           checker,
-		requests:        make(map[string]*requestRecord),
+		id:               cfg.ID,
+		grpcAddr:         cfg.GRPCAddr,
+		httpAddr:         cfg.HTTPAddr,
+		dataDir:          cfg.DataDir,
+		preferWorkflow:   prefer,
+		requireApproval:  requireApproval,
+		quotaMaxPending:  envPolicy.MaxPendingPerUser,
+		quotaMaxPerWeek:  envPolicy.MaxPerWeek,
+		autoApproveUsers: envPolicy.AutoApproveUsers,
+		authz:            checker,
+		requests:         make(map[string]*requestRecord),
 	}
 }
 
@@ -154,7 +163,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:             m.id,
 		Name:           "Request Media",
-		Version:      "0.3.2",
+		Version:        "0.3.3",
 		Roles:          []string{"media_request"},
 		Description:    "Web UI and gRPC API for requesting movies and TV shows",
 		Author:         "MuxCore",
@@ -183,6 +192,7 @@ func (m *Module) Init(ctx context.Context) error {
 		m.requests[id] = fromStoreRecord(r)
 	}
 	m.mu.Unlock()
+	m.loadPolicyFile()
 	if m.authz == nil {
 		m.authz = authz.New(authz.Config{
 			FindAuthorizerAddr: func(ctx context.Context) (string, error) {
@@ -233,6 +243,7 @@ func (m *Module) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/requests/", m.handleRequestAction)
 	mux.HandleFunc("/api/watchlist", m.handleWatchlist)
 	mux.HandleFunc("/api/watchlist/", m.handleWatchlistItem)
+	mux.HandleFunc("/api/request-policy", m.handleRequestPolicy)
 	mux.HandleFunc("/", m.handleIndex)
 
 	m.httpSrv = &http.Server{Handler: mux}
@@ -411,7 +422,8 @@ func toStoreRecord(r *requestRecord) *reqstore.Record {
 		RequestedBy: r.RequestedBy, DenyReason: r.DenyReason,
 		SeasonNumber: r.SeasonNumber, EpisodeNumber: r.EpisodeNumber,
 		Overview: r.Overview, GenresJSON: encodeGenres(r.Genres),
-		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		QualityProfileID: r.QualityProfileID,
+		CreatedAt:        r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
 }
 
@@ -422,7 +434,8 @@ func fromStoreRecord(r *reqstore.Record) *requestRecord {
 		RequestedBy: r.RequestedBy, DenyReason: r.DenyReason,
 		SeasonNumber: r.SeasonNumber, EpisodeNumber: r.EpisodeNumber,
 		Overview: r.Overview, Genres: decodeGenres(r.GenresJSON),
-		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		QualityProfileID: r.QualityProfileID,
+		CreatedAt:        r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
 }
 
@@ -463,6 +476,19 @@ type queueParams struct {
 	SeasonNumber     int32
 	EpisodeNumber    int32
 	QualityProfileID string
+}
+
+func (rec *requestRecord) asQueue(itemType, itemID string) queueParams {
+	return queueParams{
+		ItemType:         itemType,
+		ItemID:           itemID,
+		TmdbID:           rec.TMDBID,
+		Title:            rec.Title,
+		Year:             rec.Year,
+		SeasonNumber:     rec.SeasonNumber,
+		EpisodeNumber:    rec.EpisodeNumber,
+		QualityProfileID: rec.QualityProfileID,
+	}
 }
 
 func (m *Module) tryQueueForAcquisition(ctx context.Context, p queueParams) {
@@ -577,6 +603,9 @@ func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
 // clients can spoof it. Missing identity leaves the caller empty so authz fails closed.
 func httpCallerCtx(r *http.Request) context.Context {
 	caller := strings.TrimSpace(r.Header.Get("X-Caller-Id"))
+	if caller == "" {
+		caller = strings.TrimSpace(r.Header.Get("X-MuxCore-User"))
+	}
 	return contracts.WithCallerID(r.Context(), caller)
 }
 
@@ -586,43 +615,68 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		TMDBID   int32  `json:"tmdbId"`
-		Title    string `json:"title"`
-		Year     int32  `json:"year"`
-		Overview string `json:"overview"`
-		Poster   string `json:"poster"`
+		TMDBID           int32  `json:"tmdbId"`
+		Title            string `json:"title"`
+		Year             int32  `json:"year"`
+		Overview         string `json:"overview"`
+		Poster           string `json:"poster"`
+		MediaType        string `json:"mediaType"`
+		QualityProfile   string `json:"qualityProfile"`
+		QualityProfileID string `json:"qualityProfileId"`
+		SeasonNumber     int32  `json:"seasonNumber"`
+		EpisodeNumber    int32  `json:"episodeNumber"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 
-	gResp, err := m.RequestMovie(httpCallerCtx(r), &requestmedia.RequestMovieRequest{
-		TmdbId:   req.TMDBID,
-		Title:    req.Title,
-		Year:     req.Year,
-		Overview: req.Overview,
-	})
+	qp := reqquality.Normalize(req.QualityProfileID)
+	if qp == "" {
+		qp = reqquality.Normalize(req.QualityProfile)
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(req.MediaType))
+	if mediaType == "" || mediaType == "movie" {
+		mediaType = "movie"
+	}
+
+	ctx := httpCallerCtx(r)
+	var rec *requestRecord
+	switch mediaType {
+	case "tv":
+		rec = &requestRecord{
+			ID:       fmt.Sprintf("req_tv_%d", time.Now().UnixNano()),
+			ItemType: "tv", Title: req.Title, Year: req.Year, TMDBID: req.TMDBID,
+			Overview: req.Overview, Poster: req.Poster,
+			SeasonNumber: req.SeasonNumber, EpisodeNumber: req.EpisodeNumber,
+			QualityProfileID: qp,
+		}
+	default:
+		rec = &requestRecord{
+			ID:       fmt.Sprintf("req_mv_%d", time.Now().UnixNano()),
+			ItemType: "movie", Title: req.Title, Year: req.Year, TMDBID: req.TMDBID,
+			Overview: req.Overview, Poster: req.Poster,
+			QualityProfileID: qp,
+		}
+	}
+
+	statusOut, itemID, err := m.createPendingOrFulfill(ctx, rec)
 	if err != nil {
-		slog.Error("request movie", "error", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		slog.Error("request media", "error", err, "mediaType", rec.ItemType)
+		writeGRPCError(w, err)
 		return
 	}
 
-	m.mu.Lock()
-	if rec, ok := m.requests[gResp.GetRequestId()]; ok {
-		rec.Poster = req.Poster
-		if m.store != nil {
-			_ = m.store.Put(toStoreRecord(rec))
-		}
+	out := map[string]string{
+		"requestId": rec.ID,
+		"status":    statusOut,
 	}
-	m.mu.Unlock()
-
-	json.NewEncoder(w).Encode(map[string]string{
-		"requestId": gResp.GetRequestId(),
-		"movieId":   gResp.GetMovieId(),
-		"status":    gResp.GetStatus(),
-	})
+	if rec.ItemType == "tv" {
+		out["seriesId"] = itemID
+	} else {
+		out["movieId"] = itemID
+	}
+	json.NewEncoder(w).Encode(out)
 }
 
 func (m *Module) handleRequests(w http.ResponseWriter, r *http.Request) {
@@ -756,6 +810,14 @@ func writeGRPCError(w http.ResponseWriter, err error) {
 		code = http.StatusConflict
 	case codes.InvalidArgument:
 		code = http.StatusBadRequest
+	case codes.ResourceExhausted:
+		code = http.StatusTooManyRequests
+	}
+	if code == http.StatusTooManyRequests {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": st.Message(), "code": "request.quota"})
+		return
 	}
 	http.Error(w, st.Message(), code)
 }

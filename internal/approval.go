@@ -16,6 +16,7 @@ import (
 	mgmntv1 "github.com/Muxcore-Media/media-movies/proto/mgmntv1"
 	tvmgmtv1 "github.com/Muxcore-Media/media-tvshows/proto/tvmgmtv1"
 	"github.com/Muxcore-Media/request-media/internal/authz"
+	"github.com/Muxcore-Media/request-media/internal/reqquota"
 	requestmedia "github.com/Muxcore-Media/request-media/proto/requestmedia"
 )
 
@@ -157,7 +158,13 @@ func (m *Module) createPendingOrFulfill(ctx context.Context, rec *requestRecord)
 		return "", "", err
 	}
 	rec.RequestedBy = caller
-	if !m.getRequireApproval() || m.authz.CanApprove(ctx, caller) {
+	roleApprove := m.authz.CanApprove(ctx, caller)
+	listApprove := reqquota.UserAutoApproved(m.getQuotaPolicy(), caller)
+	autoApprove := roleApprove || listApprove
+	if err := m.enforceQuota(caller, autoApprove); err != nil {
+		return "", "", err
+	}
+	if !m.getRequireApproval() || autoApprove {
 		finalStatus, id, err := m.fulfillRequest(ctx, rec)
 		if err != nil {
 			return "", "", err
@@ -196,10 +203,7 @@ func (m *Module) fulfillMovieRequest(ctx context.Context, rec *requestRecord) (s
 				"request_id": rec.ID, "tmdb_id": rec.TMDBID,
 				"title": rec.Title, "year": rec.Year, "run_id": runID,
 			})
-			m.tryQueueForAcquisition(ctx, queueParams{
-				ItemType: "movie", ItemID: fmt.Sprintf("tmdb_%d", rec.TMDBID),
-				TmdbID: rec.TMDBID, Title: rec.Title, Year: rec.Year,
-			})
+			m.tryQueueForAcquisition(ctx, rec.asQueue("movie", fmt.Sprintf("tmdb_%d", rec.TMDBID)))
 			return StatusWorkflow, "", nil
 		}
 	}
@@ -210,10 +214,7 @@ func (m *Module) fulfillMovieRequest(ctx context.Context, rec *requestRecord) (s
 			"request_id": rec.ID, "tmdb_id": rec.TMDBID,
 			"title": rec.Title, "year": rec.Year,
 		})
-		m.tryQueueForAcquisition(ctx, queueParams{
-			ItemType: "movie", ItemID: fmt.Sprintf("tmdb_%d", rec.TMDBID),
-			TmdbID: rec.TMDBID, Title: rec.Title, Year: rec.Year,
-		})
+		m.tryQueueForAcquisition(ctx, rec.asQueue("movie", fmt.Sprintf("tmdb_%d", rec.TMDBID)))
 		return StatusRequested, "", nil
 	}
 
@@ -240,10 +241,7 @@ func (m *Module) fulfillMovieRequest(ctx context.Context, rec *requestRecord) (s
 		"request_id": rec.ID, "movie_id": movieID,
 		"tmdb_id": rec.TMDBID, "title": rec.Title, "year": rec.Year,
 	})
-	m.tryQueueForAcquisition(ctx, queueParams{
-		ItemType: "movie", ItemID: movieID,
-		TmdbID: rec.TMDBID, Title: rec.Title, Year: rec.Year,
-	})
+	m.tryQueueForAcquisition(ctx, rec.asQueue("movie", movieID))
 	slog.Info("movie requested", "title", rec.Title, "tmdb_id", rec.TMDBID, "movie_id", movieID)
 	return StatusAdded, movieID, nil
 }
@@ -263,11 +261,7 @@ func (m *Module) fulfillTVRequest(ctx context.Context, rec *requestRecord) (stri
 				"title": rec.Title, "year": rec.Year, "run_id": runID,
 				"season_number": rec.SeasonNumber, "episode_number": rec.EpisodeNumber,
 			})
-			m.tryQueueForAcquisition(ctx, queueParams{
-				ItemType: "tv", ItemID: fmt.Sprintf("tmdb_%d", rec.TMDBID),
-				TmdbID: rec.TMDBID, Title: rec.Title, Year: rec.Year,
-				SeasonNumber: rec.SeasonNumber, EpisodeNumber: rec.EpisodeNumber,
-			})
+			m.tryQueueForAcquisition(ctx, rec.asQueue("tv", fmt.Sprintf("tmdb_%d", rec.TMDBID)))
 			return StatusWorkflow, "", nil
 		}
 	}
@@ -279,11 +273,7 @@ func (m *Module) fulfillTVRequest(ctx context.Context, rec *requestRecord) (stri
 			"title": rec.Title, "year": rec.Year,
 			"season_number": rec.SeasonNumber, "episode_number": rec.EpisodeNumber,
 		})
-		m.tryQueueForAcquisition(ctx, queueParams{
-			ItemType: "tv", ItemID: fmt.Sprintf("tmdb_%d", rec.TMDBID),
-			TmdbID: rec.TMDBID, Title: rec.Title, Year: rec.Year,
-			SeasonNumber: rec.SeasonNumber, EpisodeNumber: rec.EpisodeNumber,
-		})
+		m.tryQueueForAcquisition(ctx, rec.asQueue("tv", fmt.Sprintf("tmdb_%d", rec.TMDBID)))
 		return StatusRequested, "", nil
 	}
 
@@ -310,11 +300,7 @@ func (m *Module) fulfillTVRequest(ctx context.Context, rec *requestRecord) (stri
 		"title": rec.Title, "year": rec.Year,
 		"season_number": rec.SeasonNumber, "episode_number": rec.EpisodeNumber,
 	})
-	m.tryQueueForAcquisition(ctx, queueParams{
-		ItemType: "tv", ItemID: seriesID,
-		TmdbID: rec.TMDBID, Title: rec.Title, Year: rec.Year,
-		SeasonNumber: rec.SeasonNumber, EpisodeNumber: rec.EpisodeNumber,
-	})
+	m.tryQueueForAcquisition(ctx, rec.asQueue("tv", seriesID))
 	return StatusAdded, seriesID, nil
 }
 
