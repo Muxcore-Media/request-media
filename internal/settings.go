@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Muxcore-Media/core/pkg/contracts"
+	"github.com/Muxcore-Media/request-media/internal/reqquota"
 )
 
 func (m *Module) Settings() []contracts.SettingDef {
@@ -36,6 +37,33 @@ func (m *Module) settingsDefs() []contracts.SettingDef {
 			Description: "Hold new requests in pending until approved (REQUEST_REQUIRE_APPROVAL)",
 			Group:       "Approval",
 		},
+		{
+			Key:         "max_pending_per_user",
+			Label:       "Max pending requests per user",
+			Type:        contracts.SettingTypeInt,
+			Value:       strconv.Itoa(m.getQuotaPolicy().MaxPendingPerUser),
+			Default:     "0",
+			Description: "0 = unlimited. Household members cannot submit more until an approver acts (REQUEST_MAX_PENDING_PER_USER)",
+			Group:       "Approval",
+		},
+		{
+			Key:         "max_requests_per_week",
+			Label:       "Max requests per user per week",
+			Type:        contracts.SettingTypeInt,
+			Value:       strconv.Itoa(m.getQuotaPolicy().MaxPerWeek),
+			Default:     "0",
+			Description: "0 = unlimited rolling 7-day cap (REQUEST_MAX_PER_WEEK)",
+			Group:       "Approval",
+		},
+		{
+			Key:         "auto_approve_users",
+			Label:       "Auto-approve users",
+			Type:        contracts.SettingTypeString,
+			Value:       strings.Join(m.getQuotaPolicy().AutoApproveUsers, ", "),
+			Default:     "",
+			Description: "Comma-separated user ids that skip the pending queue (REQUEST_AUTO_APPROVE_USERS)",
+			Group:       "Approval",
+		},
 	}
 }
 
@@ -59,6 +87,29 @@ func (m *Module) updateSetting(key, value string) error {
 		m.cfgMu.Lock()
 		m.requireApproval = v
 		m.cfgMu.Unlock()
+		return nil
+	case "max_pending_per_user", "REQUEST_MAX_PENDING_PER_USER":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 {
+			return fmt.Errorf("invalid max_pending_per_user %q (integer >= 0)", value)
+		}
+		p := m.getQuotaPolicy()
+		p.MaxPendingPerUser = n
+		m.setQuotaPolicy(p)
+		return nil
+	case "max_requests_per_week", "REQUEST_MAX_PER_WEEK":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 {
+			return fmt.Errorf("invalid max_requests_per_week %q (integer >= 0)", value)
+		}
+		p := m.getQuotaPolicy()
+		p.MaxPerWeek = n
+		m.setQuotaPolicy(p)
+		return nil
+	case "auto_approve_users", "REQUEST_AUTO_APPROVE_USERS":
+		p := m.getQuotaPolicy()
+		p.AutoApproveUsers = reqquota.ParseUsers(value)
+		m.setQuotaPolicy(p)
 		return nil
 	default:
 		return fmt.Errorf("unknown setting %q", key)

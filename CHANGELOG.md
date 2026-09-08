@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.3] — 2026-09-08
+
+### Added
+
+- Seerr-style household quotas: `REQUEST_MAX_PENDING_PER_USER`, `REQUEST_MAX_PER_WEEK`, `REQUEST_AUTO_APPROVE_USERS`
+- Settings + persisted `request-policy.json` + HTTP `GET|PUT /api/request-policy`
+- HTTP caller also accepts `X-MuxCore-User` (media-ui BFF)
+
 ## [0.3.2] — 2026-09-06
 
 ### Added

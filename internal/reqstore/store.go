@@ -11,22 +11,23 @@ import (
 
 // Record is a persisted media request.
 type Record struct {
-	ID            string
-	ItemType      string
-	ItemID        string
-	TMDBID        int32
-	Title         string
-	Year          int32
-	Poster        string
-	Status        string
-	RequestedBy   string
-	DenyReason    string
-	SeasonNumber  int32
-	EpisodeNumber int32
-	Overview      string
-	GenresJSON    string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID               string
+	ItemType         string
+	ItemID           string
+	TMDBID           int32
+	Title            string
+	Year             int32
+	Poster           string
+	Status           string
+	RequestedBy      string
+	DenyReason       string
+	SeasonNumber     int32
+	EpisodeNumber    int32
+	Overview         string
+	GenresJSON       string
+	QualityProfileID string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // Store persists media requests in SQLite.
@@ -74,6 +75,7 @@ func (s *Store) migrate() error {
 		`ALTER TABLE requests ADD COLUMN episode_number INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE requests ADD COLUMN overview TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE requests ADD COLUMN genres_json TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE requests ADD COLUMN quality_profile_id TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("migrate column: %w", err)
@@ -101,9 +103,9 @@ func (s *Store) Put(r *Record) error {
 		INSERT INTO requests (
 			id, item_type, item_id, tmdb_id, title, year, poster, status,
 			requested_by, deny_reason, season_number, episode_number, overview, genres_json,
-			created_at, updated_at
+			quality_profile_id, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			item_type=excluded.item_type,
 			item_id=excluded.item_id,
@@ -118,9 +120,11 @@ func (s *Store) Put(r *Record) error {
 			episode_number=excluded.episode_number,
 			overview=excluded.overview,
 			genres_json=excluded.genres_json,
+			quality_profile_id=excluded.quality_profile_id,
 			updated_at=excluded.updated_at
 	`, r.ID, r.ItemType, r.ItemID, r.TMDBID, r.Title, r.Year, r.Poster, r.Status,
 		r.RequestedBy, r.DenyReason, r.SeasonNumber, r.EpisodeNumber, r.Overview, r.GenresJSON,
+		r.QualityProfileID,
 		r.CreatedAt.UTC().Format(time.RFC3339Nano),
 		r.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	)
@@ -151,7 +155,7 @@ func (s *Store) Get(id string) (*Record, error) {
 	row := s.db.QueryRow(`
 		SELECT id, item_type, item_id, tmdb_id, title, year, poster, status,
 			requested_by, deny_reason, season_number, episode_number, overview, genres_json,
-			created_at, updated_at
+			quality_profile_id, created_at, updated_at
 		FROM requests WHERE id = ?
 	`, id)
 	return scanRecord(row)
@@ -167,7 +171,7 @@ func (s *Store) ListFiltered(status, requestedBy string) ([]*Record, error) {
 	query := `
 		SELECT id, item_type, item_id, tmdb_id, title, year, poster, status,
 			requested_by, deny_reason, season_number, episode_number, overview, genres_json,
-			created_at, updated_at
+			quality_profile_id, created_at, updated_at
 		FROM requests WHERE 1=1`
 	args := []any{}
 	if status != "" {
@@ -219,7 +223,7 @@ func scanRecord(row rowScanner) (*Record, error) {
 	if err := row.Scan(
 		&r.ID, &r.ItemType, &r.ItemID, &r.TMDBID, &r.Title, &r.Year, &r.Poster, &r.Status,
 		&r.RequestedBy, &r.DenyReason, &r.SeasonNumber, &r.EpisodeNumber, &r.Overview, &r.GenresJSON,
-		&created, &updated,
+		&r.QualityProfileID, &created, &updated,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("request not found")

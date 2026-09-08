@@ -11,8 +11,14 @@ func TestSettingsPreferWorkflow(t *testing.T) {
 		t.Fatal("default require_approval should be true")
 	}
 	defs := m.Settings()
-	if len(defs) != 2 || defs[0].Key != "prefer_workflow" || defs[1].Key != "require_approval" {
-		t.Fatalf("defs=%+v", defs)
+	keys := map[string]bool{}
+	for _, d := range defs {
+		keys[d.Key] = true
+	}
+	for _, want := range []string{"prefer_workflow", "require_approval", "max_pending_per_user", "max_requests_per_week", "auto_approve_users"} {
+		if !keys[want] {
+			t.Fatalf("missing setting %s in %+v", want, defs)
+		}
 	}
 	if err := m.UpdateSetting("prefer_workflow", "false"); err != nil {
 		t.Fatal(err)

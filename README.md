@@ -48,7 +48,8 @@ Unconfigured webhook destinations remain a quiet no-op in playback-monitor.
 2. When `REQUEST_REQUIRE_APPROVAL=true` (default), the record is stored as **`pending`** and a `media.request.pending` event is published.
 3. An approver with `approve` permission on resource `media.request` calls **`ApproveRequest`**, which runs the existing library / workflow / automation handoff.
 4. To reject, call **`DenyRequest`** with a reason (visible on `GetStatus` / `ListRequests`).
-5. Callers with approve permission are **auto-approved** on create (trusted role shortcut).
+5. Callers with approve permission, or user ids listed in `REQUEST_AUTO_APPROVE_USERS`, are **auto-approved** on create.
+6. Optional household quotas (`REQUEST_MAX_PENDING_PER_USER`, `REQUEST_MAX_PER_WEEK`) return HTTP 429 `{ "code": "request.quota" }` when exceeded.
 
 Permission checks use the mesh **`authorizer`** module (`AuthService.Can`) and caller identity from `x-caller-id` / `X-Caller-Id` metadata.
 
@@ -67,6 +68,9 @@ Permission checks use the mesh **`authorizer`** module (`AuthService.Can`) and c
 | `REQUEST_HTTP_ADDR` | `:9380` | HTTP UI / JSON API listen address |
 | `REQUEST_REQUIRE_APPROVAL` | `true` | Hold new requests in `pending` until approved |
 | `REQUEST_PREFER_WORKFLOW` | `true` | Prefer workflow engine before library add |
+| `REQUEST_MAX_PENDING_PER_USER` | `0` | Max pending requests per user (`0` unlimited) |
+| `REQUEST_MAX_PER_WEEK` | `0` | Rolling 7-day request cap per user (`0` unlimited) |
+| `REQUEST_AUTO_APPROVE_USERS` | unset | Comma-separated user ids that skip the pending queue |
 | `REQUEST_DATA_DIR` | `data` | SQLite persistence directory |
 | `MUXCORE_GRPC_ADDR` | `localhost:9090` | Core mesh gRPC address (client dial) |
 | `MUXCORE_INSECURE_DISABLE_TLS` | unset | Set `true` to disable TLS for inbound gRPC and module SDK / mesh dial |
@@ -80,6 +84,8 @@ Permission checks use the mesh **`authorizer`** module (`AuthService.Can`) and c
 | `GET` | `/api/requests?status=pending` | List requests (requires `list` permission; optional status filter) |
 | `POST` | `/api/requests/{id}/approve` | Approve a pending request |
 | `POST` | `/api/requests/{id}/deny` | Deny with JSON body `{ "reason": "..." }` |
+| `GET` | `/api/request-policy` | Current limits + remaining quota for the caller |
+| `PUT` | `/api/request-policy` | Update limits (requires `approve` permission) |
 | `POST` | `/api/watchlist` | Save for later (`watchlisted` status) |
 | `DELETE` | `/api/watchlist/{id}` | Remove watchlist entry |
 

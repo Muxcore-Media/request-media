@@ -17,7 +17,8 @@ func TestPutGetList(t *testing.T) {
 	rec := &Record{
 		ID: "req1", ItemType: "movie", ItemID: "mv1", TMDBID: 42,
 		Title: "Test", Year: 2020, Poster: "/p.jpg", Status: "added",
-		CreatedAt: time.Now().UTC().Add(-time.Minute),
+		QualityProfileID: "4k",
+		CreatedAt:        time.Now().UTC().Add(-time.Minute),
 	}
 	if err := s.Put(rec); err != nil {
 		t.Fatalf("Put: %v", err)
@@ -27,7 +28,7 @@ func TestPutGetList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.Title != "Test" || got.Status != "added" || got.TMDBID != 42 {
+	if got.Title != "Test" || got.Status != "added" || got.TMDBID != 42 || got.QualityProfileID != "4k" {
 		t.Fatalf("unexpected record: %+v", got)
 	}
 
