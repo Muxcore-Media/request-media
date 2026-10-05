@@ -16,25 +16,22 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
-
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	workflowv1 "github.com/Muxcore-Media/core/proto/gen/muxcore/workflow/v1"
 	"github.com/Muxcore-Media/core/sdk/go/client"
 	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
+	"github.com/Muxcore-Media/core/sdk/go/module/meshtls"
 	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
 	metadatav1 "github.com/Muxcore-Media/metadata-tmdb/proto/metadatav1"
 	manifest "github.com/Muxcore-Media/request-media"
 	"github.com/Muxcore-Media/request-media/internal/authn"
 	"github.com/Muxcore-Media/request-media/internal/authz"
-	"github.com/Muxcore-Media/request-media/internal/grpctls"
 	"github.com/Muxcore-Media/request-media/internal/reqquality"
 	"github.com/Muxcore-Media/request-media/internal/reqstore"
 	requestmedia "github.com/Muxcore-Media/request-media/proto/requestmedia"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type Module struct {
@@ -235,20 +232,19 @@ func (m *Module) Init(ctx context.Context) error {
 }
 
 func (m *Module) Start(ctx context.Context) error {
-	var grpcOpts []grpc.ServerOption
-	tlsCfg, err := grpctls.ServerConfig()
+	so, err := meshtls.ServerOption()
 	if err != nil {
 		return fmt.Errorf("gRPC TLS: %w", err)
 	}
-	if tlsCfg != nil {
-		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
-		slog.Info("request-media gRPC TLS enabled", "addr", m.grpcAddr)
-	} else {
+	if meshtls.Insecure() {
 		slog.Warn("request-media gRPC listening without TLS (dev only)",
 			"addr", m.grpcAddr,
 			"hint", "unset MUXCORE_INSECURE_DISABLE_TLS for production",
 		)
+	} else {
+		slog.Info("request-media gRPC TLS enabled", "addr", m.grpcAddr)
 	}
+	grpcOpts := []grpc.ServerOption{so}
 	grpcOpts = append(grpcOpts, grpc.ChainUnaryInterceptor(
 		authn.UnaryInterceptor(m.identityResolver, authn.ModulePrincipals())))
 	m.grpcSrv = grpc.NewServer(grpcOpts...)
@@ -365,7 +361,7 @@ func (m *Module) findModuleAddr(ctx context.Context, capability string) (string,
 // resolveGRPCAddr prefers loopback when plaintext is explicitly enabled and the
 // bind address would otherwise listen on all interfaces.
 func resolveGRPCAddr(addr string) string {
-	if !grpctls.InsecureAllowed() {
+	if !meshtls.Insecure() {
 		return addr
 	}
 	host, port, err := net.SplitHostPort(addr)
@@ -478,7 +474,7 @@ func (m *Module) ensureAutomation(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := meshtls.Dial(addr)
 	if err != nil {
 		return fmt.Errorf("dial automation: %w", err)
 	}
@@ -556,7 +552,7 @@ func (m *Module) metadataClient(ctx context.Context) (metadatav1.MetadataService
 	if err != nil {
 		return nil, nil, err
 	}
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := meshtls.Dial(addr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dial metadata: %w", err)
 	}
@@ -1116,7 +1112,7 @@ func (m *Module) tryRunWorkflow(ctx context.Context, definitionID string, input 
 	if err != nil {
 		return "", false
 	}
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := meshtls.Dial(addr)
 	if err != nil {
 		return "", false
 	}
