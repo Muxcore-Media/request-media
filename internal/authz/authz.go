@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/Muxcore-Media/core/pkg/contracts"
 	authv1 "github.com/Muxcore-Media/core/proto/gen/muxcore/auth/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -78,9 +77,23 @@ func meshCan(findAddr func(ctx context.Context) (string, error)) CanFunc {
 	}
 }
 
-// CallerID returns the authenticated caller ID propagated by the mesh.
+type callerKey struct{}
+
+// WithCallerID returns a context carrying the end-user caller ID.
+func WithCallerID(ctx context.Context, id string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, callerKey{}, id)
+}
+
+// CallerID returns the end-user caller ID set by WithCallerID, or "" when unset.
 func CallerID(ctx context.Context) string {
-	return contracts.CallerIDFromContext(ctx)
+	if ctx == nil {
+		return ""
+	}
+	id, _ := ctx.Value(callerKey{}).(string)
+	return id
 }
 
 func (c *Checker) require(ctx context.Context, userID, action, resource string) error {

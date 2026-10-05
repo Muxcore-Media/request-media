@@ -10,7 +10,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/Muxcore-Media/core/pkg/contracts"
 	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
 	mgmntv1 "github.com/Muxcore-Media/media-movies/proto/mgmntv1"
 	"github.com/Muxcore-Media/request-media/internal/authz"
@@ -20,6 +19,19 @@ import (
 func allowAllAuthz() *authz.Checker {
 	return authz.New(authz.Config{
 		Can: func(context.Context, string, string, string) (bool, error) { return true, nil },
+	})
+}
+
+// adminOnlyAuthz allows everything, but only admin-1 may approve; ordinary
+// requesters therefore go through the pending queue.
+func adminOnlyAuthz() *authz.Checker {
+	return authz.New(authz.Config{
+		Can: func(_ context.Context, userID, action, _ string) (bool, error) {
+			if action == authz.ActionApprove {
+				return userID == "admin-1", nil
+			}
+			return true, nil
+		},
 	})
 }
 
@@ -39,7 +51,7 @@ func denyApproveAuthz() *authz.Checker {
 }
 
 func authCtx(userID string) context.Context {
-	return contracts.WithCallerID(context.Background(), userID)
+	return authz.WithCallerID(context.Background(), userID)
 }
 
 func testModuleLegacy(t *testing.T) *Module {
@@ -99,7 +111,7 @@ func TestRequestMovie_PendingWhenApprovalRequired(t *testing.T) {
 }
 
 func TestApproveRequest_QueuesAutomation(t *testing.T) {
-	m := testModuleWithApproval(t, allowAllAuthz())
+	m := testModuleWithApproval(t, adminOnlyAuthz())
 	autoStub := &stubAutomation{}
 	autoAddr := startGRPC(t, func(s *grpc.Server) {
 		automationv1.RegisterAutomationServiceServer(s, autoStub)
@@ -129,19 +141,20 @@ func TestApproveRequest_QueuesAutomation(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
-	for autoStub.last == nil && time.Now().Before(deadline) {
+	for autoStub.lastReq() == nil && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if autoStub.last == nil {
+	got := autoStub.lastReq()
+	if got == nil {
 		t.Fatal("AddToQueue not called after approve")
 	}
-	if autoStub.last.GetItemId() != "tmdb_218" {
-		t.Fatalf("AddToQueue = %+v", autoStub.last)
+	if got.GetItemId() != "tmdb_218" {
+		t.Fatalf("AddToQueue = %+v", got)
 	}
 }
 
 func TestDenyRequest_SetsReason(t *testing.T) {
-	m := testModuleWithApproval(t, allowAllAuthz())
+	m := testModuleWithApproval(t, adminOnlyAuthz())
 	resp, err := m.RequestMovie(authCtx("user-1"), &requestmedia.RequestMovieRequest{
 		TmdbId: 550, Title: "Fight Club", Year: 1999,
 	})
@@ -187,7 +200,7 @@ func TestApproveRequest_PermissionDenied(t *testing.T) {
 }
 
 func TestListRequests_FilterPending(t *testing.T) {
-	m := testModuleWithApproval(t, allowAllAuthz())
+	m := testModuleWithApproval(t, adminOnlyAuthz())
 	if _, err := m.RequestMovie(authCtx("user-1"), &requestmedia.RequestMovieRequest{
 		TmdbId: 1, Title: "A", Year: 2000,
 	}); err != nil {
@@ -234,7 +247,7 @@ func TestAddToWatchlist(t *testing.T) {
 }
 
 func TestApproveRequest_AddMovieViaPreferredCap(t *testing.T) {
-	m := testModuleWithApproval(t, allowAllAuthz())
+	m := testModuleWithApproval(t, adminOnlyAuthz())
 	stub := &stubMovies{}
 	addr := startGRPC(t, func(s *grpc.Server) {
 		mgmntv1.RegisterMovieManagementServiceServer(s, stub)
