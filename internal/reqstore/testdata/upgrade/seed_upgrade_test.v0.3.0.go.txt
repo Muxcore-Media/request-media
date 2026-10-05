@@ -1,0 +1,38 @@
+//go:build upgradeseed
+
+package reqstore
+
+import (
+	"os"
+	"testing"
+	"time"
+)
+
+// TestUpgradeSeed seeds a snapshot DB at $UPGRADE_SEED_DB using this tag's store API.
+func TestUpgradeSeed(t *testing.T) {
+	path := os.Getenv("UPGRADE_SEED_DB")
+	if path == "" {
+		t.Skip("UPGRADE_SEED_DB not set")
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	recs := []*Record{
+		{ID: "req-1", ItemType: "movie", ItemID: "mov-1", TMDBID: 603, Title: "The Matrix", Year: 1999, Poster: "/p/matrix.jpg", Status: "available", CreatedAt: base, RequestedBy: "alice@example.com", Overview: "A hacker learns the truth.", GenresJSON: "[\"Sci-Fi\"]"},
+		{ID: "req-2", ItemType: "movie", TMDBID: 27205, Title: "Inception", Year: 2010, Status: "pending", CreatedAt: base.Add(time.Hour), RequestedBy: "bob@example.com", Overview: "Dream heist.", GenresJSON: "[\"Sci-Fi\",\"Thriller\"]"},
+		{ID: "req-3", ItemType: "episode", ItemID: "ep-9", TMDBID: 1396, Title: "Breaking Bad", Year: 2008, Status: "denied", CreatedAt: base.Add(2 * time.Hour), RequestedBy: "carol@example.com", DenyReason: "already owned elsewhere", SeasonNumber: 2, EpisodeNumber: 5, Overview: "Chemistry teacher.", GenresJSON: "[\"Drama\"]"},
+	}
+	for _, r := range recs {
+		if err := s.Put(r); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.Exec(`UPDATE requests SET updated_at = ? WHERE id = ?`, r.CreatedAt.Add(time.Minute).Format(time.RFC3339Nano), r.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
