@@ -325,6 +325,7 @@ func (m *Module) dialCore(ctx context.Context) {
 	m.mc = c
 	slog.Info("request-media: connected to core mesh", "addr", meshAddr)
 	go m.runReadySubscriptions(ctx)
+	go m.consumeUserDeleted(ctx)
 }
 
 func (m *Module) publish(ctx context.Context, eventType string, payload map[string]interface{}) {

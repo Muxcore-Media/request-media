@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Subscribe to `identity.user.deleted` and rewrite `requested_by` to `deleted-user` (NFR-DATA-003). The request row stays.
+
 ## [0.3.7] - 2026-10-05
 
 

@@ -30,6 +30,9 @@ type Record struct {
 	UpdatedAt        time.Time
 }
 
+// DeletedUserID replaces requested_by after identity.user.deleted (NFR-DATA-003).
+const DeletedUserID = "deleted-user"
+
 // Store persists media requests in SQLite.
 type Store struct {
 	db *sql.DB
@@ -148,6 +151,31 @@ func (s *Store) Delete(id string) error {
 		return fmt.Errorf("request not found")
 	}
 	return nil
+}
+
+// AnonymiseRequester rewrites requested_by for one account to DeletedUserID.
+// Missing rows are not an error. Repeating the call is a no-op.
+func (s *Store) AnonymiseRequester(userID string) (int64, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return 0, fmt.Errorf("user_id is required")
+	}
+	if userID == DeletedUserID {
+		return 0, nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := s.db.Exec(
+		`UPDATE requests SET requested_by = ?, updated_at = ? WHERE requested_by = ?`,
+		DeletedUserID, now, userID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("anonymise requester: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // Get returns a request by ID.

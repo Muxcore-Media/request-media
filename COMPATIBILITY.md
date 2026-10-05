@@ -15,7 +15,7 @@ MVP host stacks pin **core@v0.5.0**. This module declares `minCoreVersion` **0.4
 
 ## Contracts
 
-No external contract package — `RequestService` gRPC + HTTP JSON UI/API.
+Consumes `identity.user.deleted` from `github.com/Muxcore-Media/contracts-media/events` (`user_id`). `RequestService` gRPC and the HTTP JSON API are otherwise local.
 
 ### Request statuses
 
