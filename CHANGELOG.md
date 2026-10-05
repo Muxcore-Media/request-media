@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.2] - 2026-10-05
+
+### Fixed
+- End-user caller identity uses a module-local context key (`authz.WithCallerID` / `authz.CallerID`) instead of the removed core helpers; empty caller still fails closed.
+- `make proto` writes generated code under `proto/`.
+
+### Changed
+- Dependencies resolve from published GitHub tags (core v0.6.2, media-automation v0.1.46); CI from the umbrella template.
+
 ## [0.3.3] — 2026-09-08
 
 ### Added

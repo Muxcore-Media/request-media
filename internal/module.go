@@ -606,7 +606,7 @@ func httpCallerCtx(r *http.Request) context.Context {
 	if caller == "" {
 		caller = strings.TrimSpace(r.Header.Get("X-MuxCore-User"))
 	}
-	return contracts.WithCallerID(r.Context(), caller)
+	return authz.WithCallerID(r.Context(), caller)
 }
 
 func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
