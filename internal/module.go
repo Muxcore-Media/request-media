@@ -28,6 +28,7 @@ import (
 	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
 	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
 	metadatav1 "github.com/Muxcore-Media/metadata-tmdb/proto/metadatav1"
+	"github.com/Muxcore-Media/request-media/internal/authn"
 	"github.com/Muxcore-Media/request-media/internal/authz"
 	"github.com/Muxcore-Media/request-media/internal/grpctls"
 	"github.com/Muxcore-Media/request-media/internal/reqquality"
@@ -52,6 +53,8 @@ type Module struct {
 	quotaMaxPerWeek  int
 	autoApproveUsers []string
 	authz            *authz.Checker
+	identity         authn.Resolver
+	identityGRPC     *authn.GRPCResolver
 	requests         map[string]*requestRecord
 	grpcSrv          *grpc.Server
 	httpSrv          *http.Server
@@ -93,6 +96,8 @@ type Config struct {
 	PreferWorkflow  *bool
 	RequireApproval *bool
 	Authz           *authz.Checker
+	// Identity overrides bearer-token resolution (tests).
+	Identity authn.Resolver
 }
 
 func NewModule(cfg Config) *Module {
@@ -155,6 +160,7 @@ func NewModule(cfg Config) *Module {
 		quotaMaxPerWeek:  envPolicy.MaxPerWeek,
 		autoApproveUsers: envPolicy.AutoApproveUsers,
 		authz:            checker,
+		identity:         cfg.Identity,
 		requests:         make(map[string]*requestRecord),
 	}
 }
@@ -201,6 +207,16 @@ func (m *Module) Init(ctx context.Context) error {
 		})
 	}
 
+	if m.identityResolver() == nil {
+		g := &authn.GRPCResolver{FindAddr: func(ctx context.Context) (string, error) {
+			return m.findModuleAddr(ctx, contracts.CapabilityIdentity)
+		}}
+		m.mu.Lock()
+		m.identityGRPC = g
+		m.identity = authn.NewCaching(g)
+		m.mu.Unlock()
+	}
+
 	grpcLis, err := net.Listen("tcp", m.grpcAddr)
 	if err != nil {
 		return fmt.Errorf("listen gRPC %s: %w", m.grpcAddr, err)
@@ -232,6 +248,8 @@ func (m *Module) Start(ctx context.Context) error {
 			"hint", "unset MUXCORE_INSECURE_DISABLE_TLS for production",
 		)
 	}
+	grpcOpts = append(grpcOpts, grpc.ChainUnaryInterceptor(
+		authn.UnaryInterceptor(m.identityResolver, authn.ModulePrincipals())))
 	m.grpcSrv = grpc.NewServer(grpcOpts...)
 	requestmedia.RegisterRequestServiceServer(m.grpcSrv, m)
 	modulesdk.RegisterSettings(m.grpcSrv, m.id, m)
@@ -274,6 +292,9 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	if m.mc != nil {
 		m.mc.Close()
+	}
+	if m.identityGRPC != nil {
+		m.identityGRPC.Close()
 	}
 	if m.automationConn != nil {
 		m.automationConn.Close()
@@ -598,15 +619,21 @@ func (m *Module) handleSearch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// httpCallerCtx propagates caller identity from the HTTP request.
-// X-Caller-Id is only trustworthy when injected by the MuxCore mesh proxy; direct
-// clients can spoof it. Missing identity leaves the caller empty so authz fails closed.
-func httpCallerCtx(r *http.Request) context.Context {
-	caller := strings.TrimSpace(r.Header.Get("X-Caller-Id"))
-	if caller == "" {
-		caller = strings.TrimSpace(r.Header.Get("X-MuxCore-User"))
+// httpCallerCtx authenticates the request (ADR-0019): the caller is the bearer
+// token's user. On failure it writes the error response and returns ok=false.
+func (m *Module) httpCallerCtx(w http.ResponseWriter, r *http.Request) (context.Context, bool) {
+	ctx, code, msg := authn.HTTPCaller(r, m.identityResolver())
+	if code != 0 {
+		http.Error(w, msg, code)
+		return nil, false
 	}
-	return authz.WithCallerID(r.Context(), caller)
+	return ctx, true
+}
+
+func (m *Module) identityResolver() authn.Resolver {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.identity
 }
 
 func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
@@ -640,7 +667,10 @@ func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
 		mediaType = "movie"
 	}
 
-	ctx := httpCallerCtx(r)
+	ctx, ok := m.httpCallerCtx(w, r)
+	if !ok {
+		return
+	}
 	var rec *requestRecord
 	switch mediaType {
 	case "tv":
@@ -684,7 +714,10 @@ func (m *Module) handleRequests(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	ctx := httpCallerCtx(r)
+	ctx, ok := m.httpCallerCtx(w, r)
+	if !ok {
+		return
+	}
 	caller := authz.CallerID(ctx)
 	if err := m.authz.RequireList(ctx, caller); err != nil {
 		writeGRPCError(w, err)
@@ -714,7 +747,10 @@ func (m *Module) handleRequestAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requestID, action := parts[0], parts[1]
-	ctx := httpCallerCtx(r)
+	ctx, ok := m.httpCallerCtx(w, r)
+	if !ok {
+		return
+	}
 	switch action {
 	case "approve":
 		if r.Method != http.MethodPost {
@@ -752,7 +788,10 @@ func (m *Module) handleWatchlist(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	ctx := httpCallerCtx(r)
+	ctx, ok := m.httpCallerCtx(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
 		ItemType string `json:"itemType"`
 		TMDBID   int32  `json:"tmdbId"`
@@ -784,7 +823,10 @@ func (m *Module) handleWatchlistItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "request id required", http.StatusBadRequest)
 		return
 	}
-	ctx := httpCallerCtx(r)
+	ctx, ok := m.httpCallerCtx(w, r)
+	if !ok {
+		return
+	}
 	if _, err := m.RemoveFromWatchlist(ctx, &requestmedia.RemoveFromWatchlistRequest{RequestId: id}); err != nil {
 		writeGRPCError(w, err)
 		return

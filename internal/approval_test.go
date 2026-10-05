@@ -64,6 +64,7 @@ func testModuleLegacy(t *testing.T) *Module {
 		DataDir:         t.TempDir(),
 		RequireApproval: &noApproval,
 		Authz:           allowAllAuthz(),
+		Identity:        testResolver{},
 	})
 	if err := m.Init(context.Background()); err != nil {
 		t.Fatalf("Init: %v", err)
@@ -82,6 +83,7 @@ func testModuleWithApproval(t *testing.T, checker *authz.Checker) *Module {
 		DataDir:         t.TempDir(),
 		RequireApproval: &requireApproval,
 		Authz:           checker,
+		Identity:        testResolver{},
 	})
 	if err := m.Init(context.Background()); err != nil {
 		t.Fatalf("Init: %v", err)

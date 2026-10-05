@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.4] - 2026-10-05
+
+
+### Security
+- ADR-0019 / NFR-SEC-007: end-user identity now comes from `Authorization: Bearer <token>` resolved via the identity provider's `ExtractIdentity` (discovered through core by capability `identity`, or pinned with `AUTH_LOCAL_GRPC_ADDR`; 30 s cache keyed by sha256(token)). Unknown token -> 401, provider unreachable -> 503. `X-Caller-Id`/`X-MuxCore-User` alone are no longer trusted; an `X-Caller-Id` that differs from the token user -> 403.
+- Legacy header-only identity requires both `MUXCORE_INSECURE_DISABLE_TLS=true` and `REQUEST_TRUST_CALLER_HEADER=1` (warns once).
+- gRPC: unary interceptor resolves `authorization` metadata the same way (gRPC handlers previously never had a caller).
+- Allowlisted mesh modules (verified mTLS client-cert CN in `REQUEST_MODULE_PRINCIPALS`, default `media-library-maintainer`) may call only list/deny without a user token.
+- Authorizer and identity-provider dials use mesh TLS (`MUXCORE_TLS_CERT/KEY/CA`); plaintext only with `MUXCORE_INSECURE_DISABLE_TLS=true`.
+
 ## [0.3.3] - 2026-10-05
 
 

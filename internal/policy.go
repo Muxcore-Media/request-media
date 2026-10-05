@@ -118,7 +118,10 @@ func (m *Module) enforceQuota(userID string, autoApprove bool) error {
 }
 
 func (m *Module) handleRequestPolicy(w http.ResponseWriter, r *http.Request) {
-	ctx := httpCallerCtx(r)
+	ctx, ok := m.httpCallerCtx(w, r)
+	if !ok {
+		return
+	}
 	caller := authz.CallerID(ctx)
 	switch r.Method {
 	case http.MethodGet:
