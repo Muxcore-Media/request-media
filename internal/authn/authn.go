@@ -16,8 +16,8 @@ import (
 	"time"
 
 	authv1 "github.com/Muxcore-Media/core/proto/gen/muxcore/auth/v1"
+	"github.com/Muxcore-Media/core/sdk/go/module/meshtls"
 	"github.com/Muxcore-Media/request-media/internal/authz"
-	"github.com/Muxcore-Media/request-media/internal/grpctls"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -141,10 +141,9 @@ type GRPCResolver struct {
 	// FindAddr discovers the identity provider (capability "identity") via core.
 	FindAddr func(ctx context.Context) (string, error)
 
-	mu    sync.Mutex
-	conn  *grpc.ClientConn
-	addr  string
-	creds credentials.TransportCredentials
+	mu   sync.Mutex
+	conn *grpc.ClientConn
+	addr string
 }
 
 func (g *GRPCResolver) client(ctx context.Context) (authv1.AuthServiceClient, error) {
@@ -163,11 +162,7 @@ func (g *GRPCResolver) client(ctx context.Context) (authv1.AuthServiceClient, er
 	if g.conn != nil && g.addr == addr {
 		return authv1.NewAuthServiceClient(g.conn), nil
 	}
-	creds, err := grpctls.ClientCredentials()
-	if err != nil {
-		return nil, err
-	}
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(creds))
+	conn, err := meshtls.Dial(addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial identity provider %s: %w", addr, err)
 	}

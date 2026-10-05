@@ -8,16 +8,14 @@ import (
 	"sort"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
-
+	"github.com/Muxcore-Media/core/sdk/go/module/meshtls"
 	mgmntv1 "github.com/Muxcore-Media/media-movies/proto/mgmntv1"
 	tvmgmtv1 "github.com/Muxcore-Media/media-tvshows/proto/tvmgmtv1"
 	"github.com/Muxcore-Media/request-media/internal/authz"
 	"github.com/Muxcore-Media/request-media/internal/reqquota"
 	requestmedia "github.com/Muxcore-Media/request-media/proto/requestmedia"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func (m *Module) ListRequests(ctx context.Context, req *requestmedia.ListRequestsRequest) (*requestmedia.ListRequestsResponse, error) {
@@ -218,7 +216,7 @@ func (m *Module) fulfillMovieRequest(ctx context.Context, rec *requestRecord) (s
 		return StatusRequested, "", nil
 	}
 
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := meshtls.Dial(addr)
 	if err != nil {
 		return "", "", fmt.Errorf("dial media-movies: %w", err)
 	}
@@ -277,7 +275,7 @@ func (m *Module) fulfillTVRequest(ctx context.Context, rec *requestRecord) (stri
 		return StatusRequested, "", nil
 	}
 
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := meshtls.Dial(addr)
 	if err != nil {
 		return "", "", fmt.Errorf("dial media-tvshows: %w", err)
 	}

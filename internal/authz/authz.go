@@ -6,8 +6,7 @@ import (
 	"log/slog"
 
 	authv1 "github.com/Muxcore-Media/core/proto/gen/muxcore/auth/v1"
-	"github.com/Muxcore-Media/request-media/internal/grpctls"
-	"google.golang.org/grpc"
+	"github.com/Muxcore-Media/core/sdk/go/module/meshtls"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -60,11 +59,7 @@ func meshCan(findAddr func(ctx context.Context) (string, error)) CanFunc {
 			slog.Warn("authorizer unavailable, denying action", "user_id", userID, "action", action, "resource", resource, "error", err)
 			return false, nil
 		}
-		creds, err := grpctls.ClientCredentials()
-		if err != nil {
-			return false, fmt.Errorf("authorizer TLS: %w", err)
-		}
-		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(creds))
+		conn, err := meshtls.Dial(addr)
 		if err != nil {
 			return false, fmt.Errorf("dial authorizer: %w", err)
 		}
