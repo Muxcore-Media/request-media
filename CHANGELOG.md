@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.3] - 2026-10-05
+
+
+### Added
+- Upgrade test (`internal/reqstore/upgrade_test.go`) with snapshot fixtures from v0.2.7, v0.3.0 (commit e89fabf, untagged) and v0.3.2 under `internal/reqstore/testdata/upgrade/` (ADR-0015, NFR-DATA-002, FR-INS-005). No migration bugs found.
+
+### Changed
+- `core/sdk/go/module` v0.6.0 -> v0.6.1 (test helper `moduletest`).
+
 ## [0.3.2] - 2026-10-05
 
 ### Fixed
