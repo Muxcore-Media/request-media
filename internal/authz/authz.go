@@ -6,9 +6,9 @@ import (
 	"log/slog"
 
 	authv1 "github.com/Muxcore-Media/core/proto/gen/muxcore/auth/v1"
+	"github.com/Muxcore-Media/request-media/internal/grpctls"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
 
@@ -60,7 +60,11 @@ func meshCan(findAddr func(ctx context.Context) (string, error)) CanFunc {
 			slog.Warn("authorizer unavailable, denying action", "user_id", userID, "action", action, "resource", resource, "error", err)
 			return false, nil
 		}
-		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		creds, err := grpctls.ClientCredentials()
+		if err != nil {
+			return false, fmt.Errorf("authorizer TLS: %w", err)
+		}
+		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(creds))
 		if err != nil {
 			return false, fmt.Errorf("dial authorizer: %w", err)
 		}
@@ -96,7 +100,32 @@ func CallerID(ctx context.Context) string {
 	return id
 }
 
+type modulePrincipalKey struct{}
+
+// WithModulePrincipal records a verified mesh module identity (client cert CN).
+func WithModulePrincipal(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, modulePrincipalKey{}, name)
+}
+
+// ModulePrincipal returns the verified module identity, or "".
+func ModulePrincipal(ctx context.Context) string {
+	s, _ := ctx.Value(modulePrincipalKey{}).(string)
+	return s
+}
+
+// moduleActions are the only actions an allowlisted module principal may perform
+// without a user token (media-library-maintainer: list + deny).
+func moduleAllowed(ctx context.Context, userID, action string) bool {
+	if userID != "" || ModulePrincipal(ctx) == "" {
+		return false
+	}
+	return action == ActionList || action == ActionDeny
+}
+
 func (c *Checker) require(ctx context.Context, userID, action, resource string) error {
+	if moduleAllowed(ctx, userID, action) {
+		return nil
+	}
 	if userID == "" {
 		return status.Error(codes.Unauthenticated, "authentication required")
 	}

@@ -9,6 +9,8 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"log/slog"
 	"math/big"
 	"os"
@@ -239,4 +241,32 @@ func firstNonEmpty(vals ...string) string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// ClientCredentials returns transport credentials for dialing mesh peers
+// (authorizer, identity provider): plaintext only when MUXCORE_INSECURE_DISABLE_TLS
+// (or MUXCORE_GRPC_INSECURE) is true; otherwise mTLS from MUXCORE_TLS_CERT/KEY
+// with an optional MUXCORE_TLS_CA root pool.
+func ClientCredentials() (credentials.TransportCredentials, error) {
+	if InsecureAllowed() {
+		return insecure.NewCredentials(), nil
+	}
+	certFile := strings.TrimSpace(os.Getenv(envTLSCert))
+	keyFile := strings.TrimSpace(os.Getenv(envTLSKey))
+	if certFile == "" || keyFile == "" {
+		return nil, fmt.Errorf("mesh TLS required: set %s and %s (or %s=true for dev)", envTLSCert, envTLSKey, envInsecureDisableTLS)
+	}
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load client TLS cert/key: %w", err)
+	}
+	cfg := &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+	if ca := strings.TrimSpace(os.Getenv(envTLSCA)); ca != "" {
+		pool, err := loadCertPool(ca)
+		if err != nil {
+			return nil, err
+		}
+		cfg.RootCAs = pool
+	}
+	return credentials.NewTLS(cfg), nil
 }
