@@ -28,6 +28,7 @@ import (
 	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
 	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
 	metadatav1 "github.com/Muxcore-Media/metadata-tmdb/proto/metadatav1"
+	manifest "github.com/Muxcore-Media/request-media"
 	"github.com/Muxcore-Media/request-media/internal/authn"
 	"github.com/Muxcore-Media/request-media/internal/authz"
 	"github.com/Muxcore-Media/request-media/internal/grpctls"
@@ -169,7 +170,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:             m.id,
 		Name:           "Request Media",
-		Version:        "0.3.3",
+		Version:        modulesdk.ManifestVersion(manifest.ManifestJSON),
 		Roles:          []string{"media_request"},
 		Description:    "Web UI and gRPC API for requesting movies and TV shows",
 		Author:         "MuxCore",
