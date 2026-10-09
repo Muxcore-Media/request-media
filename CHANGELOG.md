@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- ADR-0035 / NFR-DATA-003 user erasure: an `erasure.Reconciler` (core v0.6.17, sdk/go/module v0.6.7) applies the identity provider's erasure ledger. `watchlisted`/`pending`/`denied` requests of the erased user (and their `request_ready_notified` rows) are deleted, other requests keep their row with `requested_by = "deleted-user"`, and the id is removed from `request-policy.json` `autoApproveUsers`. Two-phase and crash-safe via the new `erasure_applied` table (forward-only migration). The erased id is then refused for create/approve with `request.user_erased`. `ERASURE_SWEEP_INTERVAL` sets the sweep interval (default 5m).
+
+### Changed
+- `request-policy.json` is now written atomically (temp file + rename).
+
 ## [0.3.7] - 2026-10-05
 
 

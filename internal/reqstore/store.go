@@ -81,7 +81,10 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("migrate column: %w", err)
 		}
 	}
-	return s.ensureReadyTable()
+	if err := s.ensureReadyTable(); err != nil {
+		return err
+	}
+	return s.ensureErasureTable()
 }
 
 // Close closes the database.
@@ -99,13 +102,17 @@ func (s *Store) Put(r *Record) error {
 		r.CreatedAt = now
 	}
 	r.UpdatedAt = now
-	_, err := s.db.Exec(`
+	// The row is written only while its requester has no erasure record
+	// (ADR-0035 §3): an erased id can never own a new row, even when the
+	// request raced the erasure. Zero rows affected means refused.
+	res, err := s.db.Exec(`
 		INSERT INTO requests (
 			id, item_type, item_id, tmdb_id, title, year, poster, status,
 			requested_by, deny_reason, season_number, episode_number, overview, genres_json,
 			quality_profile_id, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		WHERE NOT EXISTS (SELECT 1 FROM erasure_applied WHERE user_id = ?)
 		ON CONFLICT(id) DO UPDATE SET
 			item_type=excluded.item_type,
 			item_id=excluded.item_id,
@@ -127,9 +134,13 @@ func (s *Store) Put(r *Record) error {
 		r.QualityProfileID,
 		r.CreatedAt.UTC().Format(time.RFC3339Nano),
 		r.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		r.RequestedBy,
 	)
 	if err != nil {
 		return fmt.Errorf("put request: %w", err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return ErrUserErased
 	}
 	return nil
 }

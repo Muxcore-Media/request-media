@@ -72,10 +72,37 @@ Permission checks use the mesh **`authorizer`** module (`AuthService.Can`) and c
 | `REQUEST_MAX_PER_WEEK` | `0` | Rolling 7-day request cap per user (`0` unlimited) |
 | `REQUEST_AUTO_APPROVE_USERS` | unset | Comma-separated user ids that skip the pending queue |
 | `REQUEST_DATA_DIR` | `data` | SQLite persistence directory |
+| `ERASURE_SWEEP_INTERVAL` | `5m` | How often the user-erasure reconciler reads the identity provider's ledger (Go duration, clamped to 30s..24h, jittered +/-20%). An unparsable value fails startup |
 | `MUXCORE_GRPC_ADDR` | `localhost:9090` | Core mesh gRPC address (client dial) |
 | `MUXCORE_INSECURE_DISABLE_TLS` | unset | Set `true` to disable TLS for inbound gRPC and module SDK / mesh dial |
 | `MUXCORE_GRPC_INSECURE` | unset | Alias for `MUXCORE_INSECURE_DISABLE_TLS` |
 | `REQUEST_TLS_CERT` / `REQUEST_TLS_KEY` / `REQUEST_TLS_CA` | unset | Optional PEM paths for inbound gRPC TLS (falls back to `MUXCORE_TLS_*`, then auto-generated certs under `REQUEST_TLS_DIR` or `~/.muxcore/tls/request-media`) |
+
+## User erasure (ADR-0035, NFR-DATA-003)
+
+When the identity provider deletes a user it records an erasure tombstone in its ledger. request-media runs the
+SDK's `erasure.Reconciler` (`sdk/go/module/erasure`): at startup and every `ERASURE_SWEEP_INTERVAL` it reads the whole ledger from the provider of the exclusive `identity` capability (certificate CN must
+equal the provider's module id), applies each tombstone it has not applied, checks the post-condition and
+acknowledges. **The ledger is the only trigger**: no event, header or HTTP request erases anything. Requires the
+module's mesh certificate (CN = module id) and listing in the provider's `AUTH_ERASURE_CONSUMERS` /
+`AUTH_ERASURE_REQUIRED`. The household profile fails startup if the reconciler cannot run; plaintext (dev) follows
+`meshtls` rules.
+
+| Data | Disposition |
+|------|-------------|
+| `requests` in `watchlisted`, `pending`, `denied` | deleted, with their `request_ready_notified` rows |
+| `requests` in any other state (`requested`, `added`, `workflow`, legacy `available`) | household acquisition record kept; `requested_by` becomes `deleted-user` |
+| `request-policy.json` `autoApproveUsers` | the id is removed (atomic rewrite, file mode and other users preserved) |
+| quotas | computed from `requests`, nothing stored; votes and comments do not exist |
+
+Two phases, because the policy file is outside SQLite: (1) one SQLite transaction deletes/anonymises the rows and
+inserts the `erasure_applied` row with `policy_done = 0`; (2) the id is removed from the policy file and
+`policy_done` is set to 1. The tombstone counts as applied (and is acknowledged OK) only after phase 2, so a crash
+between the phases is finished by the next sweep. Once the `erasure_applied` row exists the erased id is refused
+(`403 {"code": "request.user_erased"}`, gRPC `PermissionDenied`) for create, watchlist, approve and deny, and a token
+that still resolves for it is treated as invalid. `REQUEST_AUTO_APPROVE_USERS` is operator configuration the module
+cannot rewrite: an erased id is dropped from it at runtime and on every start, but the variable should be edited.
+Archives made before the deletion are not rewritten (ADR-0035 §4).
 
 ## HTTP JSON (approval)
 

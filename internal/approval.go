@@ -43,6 +43,9 @@ func (m *Module) ListRequests(ctx context.Context, req *requestmedia.ListRequest
 
 func (m *Module) ApproveRequest(ctx context.Context, req *requestmedia.ApproveRequestRequest) (*requestmedia.ApproveRequestResponse, error) {
 	caller := authz.CallerID(ctx)
+	if err := m.refuseErased(ctx, caller); err != nil {
+		return nil, err
+	}
 	if err := m.authz.RequireApprove(ctx, caller); err != nil {
 		return nil, err
 	}
@@ -60,7 +63,9 @@ func (m *Module) ApproveRequest(ctx context.Context, req *requestmedia.ApproveRe
 	rec.Status = finalStatus
 	rec.ItemID = itemID
 	rec.DenyReason = ""
-	m.saveRequest(rec)
+	if err := m.saveRequest(rec); err != nil {
+		return nil, err
+	}
 	return &requestmedia.ApproveRequestResponse{
 		RequestId: rec.ID,
 		Status:    finalStatus,
@@ -70,6 +75,9 @@ func (m *Module) ApproveRequest(ctx context.Context, req *requestmedia.ApproveRe
 
 func (m *Module) DenyRequest(ctx context.Context, req *requestmedia.DenyRequestRequest) (*requestmedia.DenyRequestResponse, error) {
 	caller := authz.CallerID(ctx)
+	if err := m.refuseErased(ctx, caller); err != nil {
+		return nil, err
+	}
 	if err := m.authz.RequireDeny(ctx, caller); err != nil {
 		return nil, err
 	}
@@ -86,7 +94,9 @@ func (m *Module) DenyRequest(ctx context.Context, req *requestmedia.DenyRequestR
 	}
 	rec.Status = StatusDenied
 	rec.DenyReason = reason
-	m.saveRequest(rec)
+	if err := m.saveRequest(rec); err != nil {
+		return nil, err
+	}
 	go m.publish(context.Background(), "media.request.denied", map[string]interface{}{
 		"request_id": rec.ID, "title": rec.Title, "reason": reason, "requested_by": rec.RequestedBy,
 	})
@@ -99,6 +109,9 @@ func (m *Module) DenyRequest(ctx context.Context, req *requestmedia.DenyRequestR
 
 func (m *Module) AddToWatchlist(ctx context.Context, req *requestmedia.AddToWatchlistRequest) (*requestmedia.AddToWatchlistResponse, error) {
 	caller := authz.CallerID(ctx)
+	if err := m.refuseErased(ctx, caller); err != nil {
+		return nil, err
+	}
 	if err := m.authz.RequireWatchlist(ctx, caller); err != nil {
 		return nil, err
 	}
@@ -112,12 +125,17 @@ func (m *Module) AddToWatchlist(ctx context.Context, req *requestmedia.AddToWatc
 		Title: req.GetTitle(), Year: req.GetYear(), Poster: req.GetPoster(),
 		Status: StatusWatchlisted, RequestedBy: caller,
 	}
-	m.saveRequest(rec)
+	if err := m.saveRequest(rec); err != nil {
+		return nil, err
+	}
 	return &requestmedia.AddToWatchlistResponse{RequestId: requestID, Status: StatusWatchlisted}, nil
 }
 
 func (m *Module) RemoveFromWatchlist(ctx context.Context, req *requestmedia.RemoveFromWatchlistRequest) (*requestmedia.RemoveFromWatchlistResponse, error) {
 	caller := authz.CallerID(ctx)
+	if err := m.refuseErased(ctx, caller); err != nil {
+		return nil, err
+	}
 	if err := m.authz.RequireWatchlist(ctx, caller); err != nil {
 		return nil, err
 	}
@@ -152,6 +170,9 @@ func (m *Module) getRequest(id string) (*requestRecord, error) {
 
 func (m *Module) createPendingOrFulfill(ctx context.Context, rec *requestRecord) (status string, itemID string, err error) {
 	caller := authz.CallerID(ctx)
+	if err := m.refuseErased(ctx, caller); err != nil {
+		return "", "", err
+	}
 	if err := m.authz.RequireCreate(ctx, caller); err != nil {
 		return "", "", err
 	}
@@ -169,11 +190,15 @@ func (m *Module) createPendingOrFulfill(ctx context.Context, rec *requestRecord)
 		}
 		rec.Status = finalStatus
 		rec.ItemID = id
-		m.saveRequest(rec)
+		if err := m.saveRequest(rec); err != nil {
+			return "", "", err
+		}
 		return finalStatus, id, nil
 	}
 	rec.Status = StatusPending
-	m.saveRequest(rec)
+	if err := m.saveRequest(rec); err != nil {
+		return "", "", err
+	}
 	go m.publish(context.Background(), "media.request.pending", map[string]interface{}{
 		"request_id": rec.ID, "title": rec.Title, "item_type": rec.ItemType,
 		"tmdb_id": rec.TMDBID, "requested_by": rec.RequestedBy,
