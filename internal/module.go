@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -20,6 +21,7 @@ import (
 	workflowv1 "github.com/Muxcore-Media/core/proto/gen/muxcore/workflow/v1"
 	"github.com/Muxcore-Media/core/sdk/go/client"
 	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
+	"github.com/Muxcore-Media/core/sdk/go/module/erasure"
 	"github.com/Muxcore-Media/core/sdk/go/module/meshtls"
 	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
 	metadatav1 "github.com/Muxcore-Media/metadata-tmdb/proto/metadatav1"
@@ -64,6 +66,16 @@ type Module struct {
 
 	automationClient automationv1.AutomationServiceClient
 	automationConn   *grpc.ClientConn
+
+	// policyFileMu serialises read-modify-write of request-policy.json.
+	policyFileMu sync.Mutex
+
+	// ADR-0035 erasure reconciler (erasure.go).
+	erasureDialer *erasure.ProviderDialer
+	erasureMu     sync.Mutex
+	erasure       *erasure.Reconciler
+	erasureCancel context.CancelFunc
+	erasureDone   chan struct{}
 }
 
 type requestRecord struct {
@@ -96,6 +108,9 @@ type Config struct {
 	Authz           *authz.Checker
 	// Identity overrides bearer-token resolution (tests).
 	Identity authn.Resolver
+	// ErasureDialer overrides the ADR-0035 identity-provider dialer, which
+	// otherwise discovers the provider through the core connection (tests).
+	ErasureDialer *erasure.ProviderDialer
 }
 
 func NewModule(cfg Config) *Module {
@@ -159,6 +174,7 @@ func NewModule(cfg Config) *Module {
 		autoApproveUsers: envPolicy.AutoApproveUsers,
 		authz:            checker,
 		identity:         cfg.Identity,
+		erasureDialer:    cfg.ErasureDialer,
 		requests:         make(map[string]*requestRecord),
 	}
 }
@@ -197,6 +213,7 @@ func (m *Module) Init(ctx context.Context) error {
 	}
 	m.mu.Unlock()
 	m.loadPolicyFile()
+	m.dropErasedAutoApprove(ctx)
 	if m.authz == nil {
 		m.authz = authz.New(authz.Config{
 			FindAuthorizerAddr: func(ctx context.Context) (string, error) {
@@ -263,7 +280,30 @@ func (m *Module) Start(ctx context.Context) error {
 
 	m.httpSrv = &http.Server{Handler: mux}
 
-	go m.dialCore(ctx)
+	// The core connection is lazy, so this does not wait for core. The
+	// household profile requires the erasure reconciler (ADR-0035): there a
+	// missing connection or a configuration error fails Start instead of
+	// leaving erasure silently off.
+	if err := m.connectCore(ctx); err != nil {
+		if householdProfile() {
+			return err
+		}
+		slog.Error("request-media: dial core", "error", err)
+	}
+	dialer := m.erasureDialer
+	if dialer == nil && m.mc != nil {
+		dialer = &erasure.ProviderDialer{Discovery: m.mc.Discovery.Raw()}
+	}
+	switch {
+	case dialer != nil:
+		if err := m.startErasure(dialer); err != nil {
+			return fmt.Errorf("start erasure reconciler: %w", err)
+		}
+	case householdProfile():
+		return errors.New("start erasure reconciler: no core connection (required in the household profile)")
+	default:
+		slog.Warn("request-media: erasure reconciler not started: no core connection (dev only)")
+	}
 
 	go func() {
 		slog.Info("request-media gRPC service started", "addr", m.grpcAddr)
@@ -281,6 +321,8 @@ func (m *Module) Start(ctx context.Context) error {
 }
 
 func (m *Module) Stop(ctx context.Context) error {
+	// The reconciler first: it uses the store and the core connection.
+	m.stopErasure(ctx)
 	if m.httpSrv != nil {
 		m.httpSrv.Close()
 	}
@@ -307,7 +349,7 @@ func (m *Module) Health(ctx context.Context) error {
 	return nil
 }
 
-func (m *Module) dialCore(ctx context.Context) {
+func (m *Module) connectCore(ctx context.Context) error {
 	meshAddr := os.Getenv("MUXCORE_GRPC_ADDR")
 	if meshAddr == "" {
 		meshAddr = "localhost:9090"
@@ -319,12 +361,12 @@ func (m *Module) dialCore(ctx context.Context) {
 	}
 	c, err := client.Dial(meshAddr, opts...)
 	if err != nil {
-		slog.Error("request-media: dial core", "error", err)
-		return
+		return fmt.Errorf("dial core %s: %w", meshAddr, err)
 	}
 	m.mc = c
 	slog.Info("request-media: connected to core mesh", "addr", meshAddr)
 	go m.runReadySubscriptions(ctx)
+	return nil
 }
 
 func (m *Module) publish(ctx context.Context, eventType string, payload map[string]interface{}) {
@@ -416,7 +458,10 @@ func (m *Module) findModuleAddrPrefer(ctx context.Context, capabilities ...strin
 	return "", lastErr
 }
 
-func (m *Module) saveRequest(rec *requestRecord) {
+// saveRequest stores rec. It returns the stable errUserErased when the store
+// refuses the write because the requester has an erasure record (ADR-0035);
+// other persistence failures are logged as before.
+func (m *Module) saveRequest(rec *requestRecord) error {
 	now := time.Now()
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = now
@@ -426,11 +471,20 @@ func (m *Module) saveRequest(rec *requestRecord) {
 	m.requests[rec.ID] = rec
 	m.mu.Unlock()
 	if m.store == nil {
-		return
+		return nil
 	}
 	if err := m.store.Put(toStoreRecord(rec)); err != nil {
+		if errors.Is(err, reqstore.ErrUserErased) {
+			m.mu.Lock()
+			if m.requests[rec.ID] == rec {
+				delete(m.requests, rec.ID)
+			}
+			m.mu.Unlock()
+			return errUserErased()
+		}
 		slog.Warn("persist request failed", "id", rec.ID, "error", err)
 	}
+	return nil
 }
 
 func toStoreRecord(r *requestRecord) *reqstore.Record {
@@ -624,13 +678,25 @@ func (m *Module) httpCallerCtx(w http.ResponseWriter, r *http.Request) (context.
 		http.Error(w, msg, code)
 		return nil, false
 	}
+	// The legacy header path never reaches the resolver; refuse erased ids
+	// here too.
+	if err := m.refuseErased(ctx, authz.CallerID(ctx)); err != nil {
+		writeGRPCError(w, err)
+		return nil, false
+	}
 	return ctx, true
 }
 
+// identityResolver returns the token resolver, wrapped so a token that still
+// resolves for an erased user is not honoured (ADR-0035).
 func (m *Module) identityResolver() authn.Resolver {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.identity
+	id := m.identity
+	m.mu.RUnlock()
+	if id == nil {
+		return nil
+	}
+	return erasedGuard{next: id, m: m}
 }
 
 func (m *Module) handleRequest(w http.ResponseWriter, r *http.Request) {
@@ -851,6 +917,12 @@ func writeGRPCError(w http.ResponseWriter, err error) {
 		code = http.StatusBadRequest
 	case codes.ResourceExhausted:
 		code = http.StatusTooManyRequests
+	}
+	if st.Code() == codes.PermissionDenied && strings.HasPrefix(st.Message(), CodeUserErased) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": st.Message(), "code": CodeUserErased})
+		return
 	}
 	if code == http.StatusTooManyRequests {
 		w.Header().Set("Content-Type", "application/json")

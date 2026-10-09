@@ -1,7 +1,9 @@
 package internal
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -54,16 +56,16 @@ func (m *Module) persistPolicyFile() {
 	if path == "" {
 		return
 	}
+	m.policyFileMu.Lock()
+	defer m.policyFileMu.Unlock()
 	p := m.getQuotaPolicy()
-	b, err := json.MarshalIndent(requestPolicyFile{
+	if err := writePolicyFileAtomic(path, requestPolicyFile{
 		MaxPendingPerUser: p.MaxPendingPerUser,
 		MaxPerWeek:        p.MaxPerWeek,
 		AutoApproveUsers:  p.AutoApproveUsers,
-	}, "", "  ")
-	if err != nil {
-		return
+	}); err != nil {
+		slog.Warn("request-media: persist policy file failed", "error", err)
 	}
-	_ = os.WriteFile(path, b, 0o600)
 }
 
 func (m *Module) getQuotaPolicy() reqquota.Policy {
@@ -77,6 +79,16 @@ func (m *Module) getQuotaPolicy() reqquota.Policy {
 }
 
 func (m *Module) setQuotaPolicy(p reqquota.Policy) {
+	// An erased id never re-enters the auto-approve list (ADR-0035).
+	if m.store != nil {
+		var kept []string
+		for _, u := range p.AutoApproveUsers {
+			if erased, err := m.store.UserErased(context.Background(), u); err == nil && !erased {
+				kept = append(kept, u)
+			}
+		}
+		p.AutoApproveUsers = kept
+	}
 	m.cfgMu.Lock()
 	m.quotaMaxPending = p.MaxPendingPerUser
 	m.quotaMaxPerWeek = p.MaxPerWeek

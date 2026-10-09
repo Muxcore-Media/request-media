@@ -1,6 +1,8 @@
 package reqstore
 
 import (
+	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -31,6 +33,9 @@ func TestUpgradeFromSnapshots(t *testing.T) {
 		{"v0.2.7", false, false, false},
 		{"v0.3.0", true, false, false},
 		{"v0.3.2", true, true, true},
+		// The current release (ADR-0035 slice E4 starts from it): no
+		// erasure_applied table yet.
+		{"v0.3.7", true, true, true},
 	}
 
 	freshStore, err := Open(filepath.Join(t.TempDir(), "fresh.db"))
@@ -59,6 +64,9 @@ func TestUpgradeFromSnapshots(t *testing.T) {
 			t.Cleanup(func() { _ = s.Close() })
 
 			moduletest.RequireSchemaSuperset(t, moduletest.Schema(t, s.db), fresh)
+			if _, ok := moduletest.Schema(t, s.db).Tables["erasure_applied"]; !ok {
+				t.Error("upgrade did not create erasure_applied")
+			}
 
 			list, err := s.List()
 			if err != nil {
@@ -116,6 +124,62 @@ func TestUpgradeFromSnapshots(t *testing.T) {
 			// Upgraded store stays writable with the current API.
 			if err := s.Put(&Record{ID: "req-new", ItemType: "movie", Title: "New", QualityProfileID: "q"}); err != nil {
 				t.Fatalf("put after upgrade: %v", err)
+			}
+			moduletest.RequireIntegrity(t, s.db)
+		})
+	}
+}
+
+// TestUpgradeThenErase applies an erasure to every upgraded snapshot: the
+// forward-only migration must leave a store that erases correctly.
+func TestUpgradeThenErase(t *testing.T) {
+	for _, name := range []string{"v0.2.7", "v0.3.0", "v0.3.2", "v0.3.7"} {
+		t.Run(name, func(t *testing.T) {
+			s, err := Open(moduletest.CopyFixture(t, filepath.Join("testdata", "upgrade", name+".db")))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s.Close() })
+			ctx := context.Background()
+			// v0.2.7 predates requested_by: every row is '' and nothing matches.
+			seeded := name != "v0.2.7"
+
+			for i, c := range []struct {
+				who                string
+				deleted, anonymise int64
+			}{
+				{"alice@example.com", 0, 1}, // available -> household record
+				{"bob@example.com", 1, 0},   // pending   -> deleted
+				{"carol@example.com", 1, 0}, // denied    -> deleted
+			} {
+				rec, err := s.EraseUser(ctx, fmt.Sprintf("er-%d", i), c.who, "")
+				if err != nil {
+					t.Fatalf("erase %s: %v", c.who, err)
+				}
+				wantDeleted, wantAnon := c.deleted, c.anonymise
+				if !seeded {
+					wantDeleted, wantAnon = 0, 0
+				}
+				if rec.Counts[CountRequestsDeleted] != wantDeleted || rec.Counts[CountRequestsAnonymised] != wantAnon {
+					t.Errorf("%s counts = %v, want deleted=%d anonymised=%d", c.who, rec.Counts, wantDeleted, wantAnon)
+				}
+				if n, err := s.CountUserRows(ctx, c.who); err != nil || n != 0 {
+					t.Errorf("%s remaining = %d, %v", c.who, n, err)
+				}
+			}
+			if !seeded {
+				return
+			}
+			// alice's 'available' row is the household record: it stays,
+			// anonymised; bob's pending and carol's denied rows are gone.
+			r, err := s.Get("req-1")
+			if err != nil || r.RequestedBy != AnonymisedUser || r.Title == "" {
+				t.Errorf("req-1 = %+v, %v", r, err)
+			}
+			for _, id := range []string{"req-2", "req-3"} {
+				if _, err := s.Get(id); err == nil {
+					t.Errorf("%s survived erasure", id)
+				}
 			}
 			moduletest.RequireIntegrity(t, s.db)
 		})

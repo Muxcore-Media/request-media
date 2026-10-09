@@ -28,6 +28,11 @@ No external contract package — `RequestService` gRPC + HTTP JSON UI/API.
 | `added` | Approved; added to library |
 | `workflow` | Approved; handed to workflow engine |
 
+After an identity-provider user erasure (ADR-0035) `requested_by` of the user's `requested` / `added` / `workflow`
+requests reads `deleted-user`, the user's `pending` / `denied` / `watchlisted` requests no longer exist, and that id is
+refused for create / watchlist / approve / deny with HTTP 403 `{"code": "request.user_erased"}` (gRPC `PermissionDenied`
+with the same prefix).
+
 ### Authorization
 
 Uses mesh capability **`authorizer`** (`AuthService.Can`) with resource **`media.request`**:
