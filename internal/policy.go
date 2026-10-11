@@ -79,21 +79,36 @@ func (m *Module) getQuotaPolicy() reqquota.Policy {
 }
 
 func (m *Module) setQuotaPolicy(p reqquota.Policy) {
-	// An erased id never re-enters the auto-approve list (ADR-0035).
+	var isErased func(string) (bool, error)
 	if m.store != nil {
+		isErased = func(userID string) (bool, error) {
+			return m.store.UserErased(context.Background(), userID)
+		}
+	}
+	m.setQuotaPolicyChecked(p, isErased)
+}
+
+// setQuotaPolicyChecked keeps the erasure lookup replaceable in concurrency
+// tests. Runtime callers always use setQuotaPolicy and the request store.
+func (m *Module) setQuotaPolicyChecked(p reqquota.Policy, isErased func(string) (bool, error)) {
+	// Keep each lookup and the assignment indivisible with respect to erasure's
+	// in-memory removal. The erasure transaction commits before taking cfgMu.
+	m.cfgMu.Lock()
+	// An erased id never re-enters the auto-approve list (ADR-0035).
+	if isErased != nil {
 		var kept []string
 		for _, u := range p.AutoApproveUsers {
-			if erased, err := m.store.UserErased(context.Background(), u); err == nil && !erased {
+			if erased, err := isErased(u); err == nil && !erased {
 				kept = append(kept, u)
 			}
 		}
 		p.AutoApproveUsers = kept
 	}
-	m.cfgMu.Lock()
 	m.quotaMaxPending = p.MaxPendingPerUser
 	m.quotaMaxPerWeek = p.MaxPerWeek
 	m.autoApproveUsers = append([]string(nil), p.AutoApproveUsers...)
 	m.cfgMu.Unlock()
+	// Persistence takes policyFileMu and then reads cfgMu; never hold cfgMu here.
 	m.persistPolicyFile()
 }
 

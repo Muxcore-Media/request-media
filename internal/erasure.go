@@ -355,26 +355,50 @@ func removeStalePolicyTemps(path string) {
 }
 
 // dropErasedAutoApprove removes erased ids from the in-memory auto-approve
-// list. The list is seeded from REQUEST_AUTO_APPROVE_USERS, which the module
-// cannot rewrite; this keeps an erased id out of it after every restart.
-func (m *Module) dropErasedAutoApprove(ctx context.Context) {
+// list and repairs an existing policy file for completed erasures: a stale
+// policy save in an older version could have restored the id after policy_done
+// was recorded. Pending file cleanup remains with Apply so its removal count
+// is preserved. An environment-only list does not create a file, and startup
+// must report failed durable sanitation.
+func (m *Module) dropErasedAutoApprove(ctx context.Context) error {
 	if m.store == nil {
-		return
+		return nil
+	}
+	// loadPolicyFile historically ignores read/parse failures. Do not mistake
+	// an empty fallback list for verified sanitation of an existing file.
+	if _, _, err := m.readPolicyFile(); err != nil {
+		return fmt.Errorf("read auto-approve policy file: %w", err)
 	}
 	m.cfgMu.Lock()
-	defer m.cfgMu.Unlock()
-	var kept []string
+	var kept, removed []string
 	for _, u := range m.autoApproveUsers {
-		erased, err := m.store.UserErased(ctx, strings.TrimSpace(u))
-		if err != nil || erased {
+		userID := strings.TrimSpace(u)
+		erased, err := m.store.UserErased(ctx, userID)
+		if err != nil {
+			m.cfgMu.Unlock()
+			return fmt.Errorf("read erasure state for auto-approve list: %w", err)
+		}
+		if erased {
+			complete, err := m.store.UserErasureComplete(ctx, userID)
 			if err != nil {
-				slog.Warn("request-media: cannot read erasure state for auto-approve list", "error", err)
+				m.cfgMu.Unlock()
+				return fmt.Errorf("read erasure completion for auto-approve list: %w", err)
+			}
+			if complete {
+				removed = append(removed, userID)
 			}
 			continue
 		}
 		kept = append(kept, u)
 	}
 	m.autoApproveUsers = kept
+	m.cfgMu.Unlock()
+	for _, userID := range removed {
+		if _, err := m.removeAutoApprove(userID); err != nil {
+			return fmt.Errorf("sanitize auto-approve policy file: %w", err)
+		}
+	}
+	return nil
 }
 
 // householdProfile reports whether MUXCORE_PROFILE names the household
