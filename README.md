@@ -104,6 +104,12 @@ that still resolves for it is treated as invalid. `REQUEST_AUTO_APPROVE_USERS` i
 cannot rewrite: an erased id is dropped from it at runtime and on every start, but the variable should be edited.
 Archives made before the deletion are not rewritten (ADR-0035 §4).
 
+Policy saves serialize their erased-user check and in-memory update with erasure
+cleanup. Startup also removes locally tombstoned ids from an existing policy file,
+even when the provider already acknowledged the erasure, repairing stale saves from
+older versions. Failure to read erasure state or persist that cleanup fails startup.
+An environment-only policy does not create a file during cleanup.
+
 ## HTTP JSON (approval)
 
 | Method | Path | Description |

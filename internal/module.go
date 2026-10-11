@@ -213,7 +213,11 @@ func (m *Module) Init(ctx context.Context) error {
 	}
 	m.mu.Unlock()
 	m.loadPolicyFile()
-	m.dropErasedAutoApprove(ctx)
+	if err := m.dropErasedAutoApprove(ctx); err != nil {
+		_ = store.Close()
+		m.store = nil
+		return fmt.Errorf("sanitize erased auto-approve users: %w", err)
+	}
 	if m.authz == nil {
 		m.authz = authz.New(authz.Config{
 			FindAuthorizerAddr: func(ctx context.Context) (string, error) {
