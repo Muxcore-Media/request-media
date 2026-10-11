@@ -355,10 +355,11 @@ func removeStalePolicyTemps(path string) {
 }
 
 // dropErasedAutoApprove removes erased ids from the in-memory auto-approve
-// list and an existing policy file. Repair the file even for an already
-// acknowledged erasure: a stale policy save in an older version could have
-// restored the id after policy_done was recorded. An environment-only list
-// does not create a file, and startup must report failed durable sanitation.
+// list and repairs an existing policy file for completed erasures: a stale
+// policy save in an older version could have restored the id after policy_done
+// was recorded. Pending file cleanup remains with Apply so its removal count
+// is preserved. An environment-only list does not create a file, and startup
+// must report failed durable sanitation.
 func (m *Module) dropErasedAutoApprove(ctx context.Context) error {
 	if m.store == nil {
 		return nil
@@ -378,7 +379,14 @@ func (m *Module) dropErasedAutoApprove(ctx context.Context) error {
 			return fmt.Errorf("read erasure state for auto-approve list: %w", err)
 		}
 		if erased {
-			removed = append(removed, userID)
+			complete, err := m.store.UserErasureComplete(ctx, userID)
+			if err != nil {
+				m.cfgMu.Unlock()
+				return fmt.Errorf("read erasure completion for auto-approve list: %w", err)
+			}
+			if complete {
+				removed = append(removed, userID)
+			}
 			continue
 		}
 		kept = append(kept, u)

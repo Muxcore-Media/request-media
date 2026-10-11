@@ -204,6 +204,22 @@ func (s *Store) ErasureComplete(ctx context.Context, erasureID string) (bool, er
 	return rec.PolicyDone, nil
 }
 
+// UserErasureComplete reports whether the user has local erasure records and
+// every record has finished its policy-file phase. Startup may repair a policy
+// file left by an old stale save only in this state; a pending phase must retain
+// its file cleanup so Apply can record the original removal count.
+func (s *Store) UserErasureComplete(ctx context.Context, userID string) (bool, error) {
+	var complete bool
+	err := s.db.QueryRowContext(ctx, `SELECT
+		EXISTS(SELECT 1 FROM erasure_applied WHERE user_id = ?) AND
+		NOT EXISTS(SELECT 1 FROM erasure_applied WHERE user_id = ? AND policy_done = 0)`,
+		userID, userID).Scan(&complete)
+	if err != nil {
+		return false, fmt.Errorf("check user erasure completion: %w", err)
+	}
+	return complete, nil
+}
+
 // MarkPolicyDone commits the second phase of an erasure and stores the final
 // counts. It is idempotent.
 func (s *Store) MarkPolicyDone(ctx context.Context, erasureID string, counts map[string]int64) error {

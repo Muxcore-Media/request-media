@@ -147,6 +147,43 @@ func TestEraseUserIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestUserErasureCompletePreservesPendingPolicyWork(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	wantComplete := func(userID string, want bool) {
+		t.Helper()
+		if got, err := s.UserErasureComplete(ctx, userID); err != nil || got != want {
+			t.Fatalf("UserErasureComplete(%q) = %v, %v; want %v", userID, got, err, want)
+		}
+	}
+	wantComplete("victim", false)
+	if _, err := s.EraseUser(ctx, "er-1", "victim", ""); err != nil {
+		t.Fatal(err)
+	}
+	wantComplete("victim", false)
+	if err := s.MarkPolicyDone(ctx, "er-1", map[string]int64{CountAutoApprove: 1}); err != nil {
+		t.Fatal(err)
+	}
+	wantComplete("victim", true)
+	wantComplete("bystander", false)
+	// A complete marker cannot let startup consume another marker's pending
+	// file cleanup and lose the removal count that Apply still needs to record.
+	if _, err := s.EraseUser(ctx, "er-2", "victim", ""); err != nil {
+		t.Fatal(err)
+	}
+	wantComplete("victim", false)
+	if err := s.MarkPolicyDone(ctx, "er-2", nil); err != nil {
+		t.Fatal(err)
+	}
+	wantComplete("victim", true)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UserErasureComplete(ctx, "victim"); err == nil {
+		t.Error("closed store was treated as completed erasure")
+	}
+}
+
 func TestEraseUserRejectsUnusableTargets(t *testing.T) {
 	s, _ := openTemp(t)
 	mustPut(t, s, "a", "added", AnonymisedUser)

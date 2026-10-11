@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
-- Serialize auto-approve policy validation and assignment with user erasure so an overlapping quota/settings save cannot restore an erased identifier after acknowledgement. Startup also sanitizes existing policy files against local tombstones, including already acknowledged erasures, and fails if that cleanup cannot be persisted.
+- Serialize auto-approve policy validation and assignment with user erasure so an overlapping quota/settings save cannot restore an erased identifier after acknowledgement. Startup also sanitizes existing policy files for completed local erasures, including already acknowledged erasures, and fails if that cleanup cannot be persisted. Pending policy cleanup remains with the reconciler so its original removal counts survive a restart.
 
 ## [0.3.8] - 2026-10-10
 

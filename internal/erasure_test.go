@@ -394,6 +394,15 @@ func TestErasureCrashBetweenPhases(t *testing.T) {
 	if applied, _ := (erasureOwner{m: m2}).Applied(ctx, id); applied {
 		t.Fatal("Applied is true after restart with the file step pending")
 	}
+	if p := m2.getQuotaPolicy(); !reflect.DeepEqual(p.AutoApproveUsers, []string{"admin-9", erasureBystand}) {
+		t.Errorf("pending erased user remains in startup memory: %v", p.AutoApproveUsers)
+	}
+	if f := readPolicy(t, m2); !reflect.DeepEqual(f, policyFixture()) {
+		t.Errorf("startup consumed pending policy cleanup before Apply could record its counts: %+v", f)
+	}
+	if a, ok := h.provider.Latest(id, erasureModID); ok {
+		t.Errorf("pending policy cleanup was acknowledged before recovery: %+v", a)
+	}
 	r := h.reconciler(t, m2)
 	res := mustSweepOnce(t, r)
 	if res.Applied != 1 || res.Acked != 1 {
