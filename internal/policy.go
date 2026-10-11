@@ -79,11 +79,23 @@ func (m *Module) getQuotaPolicy() reqquota.Policy {
 }
 
 func (m *Module) setQuotaPolicy(p reqquota.Policy) {
-	// An erased id never re-enters the auto-approve list (ADR-0035).
+	var isErased func(string) (bool, error)
 	if m.store != nil {
+		isErased = func(userID string) (bool, error) {
+			return m.store.UserErased(context.Background(), userID)
+		}
+	}
+	m.setQuotaPolicyChecked(p, isErased)
+}
+
+// setQuotaPolicyChecked keeps the erasure lookup replaceable in concurrency
+// tests. Runtime callers always use setQuotaPolicy and the request store.
+func (m *Module) setQuotaPolicyChecked(p reqquota.Policy, isErased func(string) (bool, error)) {
+	// An erased id never re-enters the auto-approve list (ADR-0035).
+	if isErased != nil {
 		var kept []string
 		for _, u := range p.AutoApproveUsers {
-			if erased, err := m.store.UserErased(context.Background(), u); err == nil && !erased {
+			if erased, err := isErased(u); err == nil && !erased {
 				kept = append(kept, u)
 			}
 		}
